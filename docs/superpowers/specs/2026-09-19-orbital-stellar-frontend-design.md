@@ -228,13 +228,35 @@ readable price is not.
 `ConnectButton` in the header. In mock mode it still connects (so the
 address shows) but swaps do not sign. In soroban mode it signs.
 
-### 5.4 Visual direction
+### 5.4 Visual direction (decided 2026-09-20: "Observatory", Layout A)
 
-Pending. The user will bring reference examples; the visual language
-(typography, color, motion) is decided together after that. Until then
-components are built functional and unstyled beyond layout, with all
-colors and fonts routed through Tailwind theme tokens so restyling is a
-config change, not a rewrite.
+Approved mockup: `docs/design/observatory-stage-mockup.html` (also on the
+design canvas). Rules:
+
+- Palette: deep navy-black ground (`#05070d`) with a soft radial vignette
+  toward `#0d1630`, faint orbit ellipses and a few star points in the
+  background; text `#e6ebf7`, muted `#6e7a94` / `#8a96b3`, hairlines
+  `rgba(120,150,255,0.14)`. One accent, electric teal `#37f0d0`, used for
+  the reserve dot, slider, prices, CONNECT and COMMIT. Boundary state is
+  amber `#ffb454` with a glow. No purple.
+- Type: Instrument Sans (600/700) for the wordmark, big numbers and
+  inputs; JetBrains Mono for labels, tables and nav. Section labels read
+  `TICK PLANES`, `USDC / EURC CURVE`, not `// SECTION A`.
+- Layout A ("stage + control bar"): no three equal cards. Top: one wide
+  stage with the tick planes large on the left (about 600px), the curve in
+  the middle, and a small HUD (reserves/prices, ticks) bottom-right.
+  Bottom: a full-width control bar with PAY/RECEIVE token pills, the big
+  amount, a full-width slider (with amber markers where each tick lands
+  on its plane and the right stop labelled "liquidity edge"), the quote box
+  (with the "x·y=k would give …" line) and COMMIT / RESET.
+- Section 2 shows a single curve: the classic `x·y=k` pool for the
+  selected pair, with its dot sliding along it and a grey ghost at the
+  committed position. The Orbital pool is not drawn here; its comparison
+  lives in the quote box and the tick planes.
+- Motion: the reserve dot leaves a short fading trail while it moves;
+  rings pulse once when they flip to boundary; nothing else animates.
+- Attack page uses the same language (two panels on the stage, one
+  full-width budget slider below).
 
 ## 6. Error handling
 
