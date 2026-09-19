@@ -5,7 +5,7 @@ import { useWallet } from "@/hooks/useWallet";
 import { TOKENS, tokenIndex } from "@/config/tokens";
 import { fromUnits, toUnits, PoolError, type Quote } from "@/lib/pool";
 import { ticksFromState } from "@/lib/pool/reconstruct";
-import { capitalEfficiency, poolPrice, poolRealReserves, pricingTicks, quote as mathQuote, type Tick } from "@/lib/orbital";
+import { capitalEfficiency, maxFillable, poolPrice, poolRealReserves, pricingTicks, quote as mathQuote, type Tick } from "@/lib/orbital";
 import { cpQuote, classicApply, classicSeed } from "@/lib/classic/constantProduct";
 import { TickPlanes } from "./TickPlanes";
 import { TwoTokenCurve } from "./TwoTokenCurve";
@@ -22,6 +22,7 @@ export function PoolView() {
   const [tokenOut, setTokenOut] = useState(TOKENS[1].code);
   const [amount, setAmount] = useState("");
   const [quote, setQuote] = useState<Quote | null>(null);
+  const [quotedAmount, setQuotedAmount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [prevTicks, setPrevTicks] = useState<Tick[] | undefined>();
@@ -40,6 +41,12 @@ export function PoolView() {
   }, [ticks, classic]);
 
   const i = tokenIndex(tokenIn), j = tokenIndex(tokenOut);
+  // cap the slider at what the committed pool can actually fill, so a max-slider swap
+  // never round-trips an InsufficientLiquidity error from the client.
+  const maxIn = useMemo(
+    () => (ticks.length ? Math.max(Math.floor(maxFillable(ticks, i, j)), 1) : 1),
+    [ticks, i, j],
+  );
   const amountNum = Number(amount);
   // synchronous, independent of the debounced client round trip — the classic row and
   // classic dot must move instantly with the slider, same as the Orbital preview does.
@@ -54,10 +61,12 @@ export function PoolView() {
 
   // authoritative numeric quote from the client (debounced)
   useEffect(() => {
-    if (!(amountNum > 0)) { setQuote(null); setError(null); return; }
+    if (!(amountNum > 0)) { setQuote(null); setQuotedAmount(null); setError(null); return; }
     const h = setTimeout(async () => {
-      try { setQuote(await client.quote(tokenIn, tokenOut, toUnits(amountNum))); setError(null); }
-      catch (e) { setQuote(null); setError(e instanceof PoolError ? e.message : String(e)); }
+      try {
+        const q = await client.quote(tokenIn, tokenOut, toUnits(amountNum));
+        setQuote(q); setQuotedAmount(amountNum); setError(null);
+      } catch (e) { setQuote(null); setQuotedAmount(null); setError(e instanceof PoolError ? e.message : String(e)); }
     }, 80);
     return () => clearTimeout(h);
   }, [amountNum, tokenIn, tokenOut, client]);
@@ -79,11 +88,14 @@ export function PoolView() {
       setPrevTicks(ticks);
       await client.swap({ from: address ?? "", tokenIn, tokenOut, amountIn: toUnits(amountNum), minOut: (quote.amountOut * 995n) / 1000n });
       setClassic((c) => (c ? classicApply(c, i, j, amountNum) : c));
-      setAmount("");
+      setAmount(""); setQuote(null); setQuotedAmount(null);
     } catch (e) { setError(e instanceof PoolError ? e.message : String(e)); }
     finally { setBusy(false); }
   };
-  const reset = async () => { await client.reset?.(); setPrevTicks(undefined); setAmount(""); setClassic(null); };
+  const reset = async () => {
+    await client.reset?.();
+    setPrevTicks(undefined); setAmount(""); setClassic(null); setQuote(null); setQuotedAmount(null);
+  };
   const flip = () => { setTokenIn(tokenOut); setTokenOut(tokenIn); };
   const pickIn = (c: string) => { if (c === tokenOut) setTokenOut(tokenIn); setTokenIn(c); };
   const pickOut = (c: string) => { if (c === tokenIn) setTokenIn(tokenOut); setTokenOut(c); };
@@ -102,8 +114,8 @@ export function PoolView() {
       </section>
       <section className="flex flex-col gap-6 border border-line p-4">
         <h2 className="font-mono text-xs text-muted">// SECTION C · SWAP</h2>
-        <SwapForm tokenIn={tokenIn} tokenOut={tokenOut} amount={amount} maxAmount={state.reserves.map(fromUnits)[i] * 2}
-          quoteOut={quote ? fromUnits(quote.amountOut) : null} price={quote?.priceAfter ?? null} error={error} busy={busy}
+        <SwapForm tokenIn={tokenIn} tokenOut={tokenOut} amount={amount} maxAmount={maxIn}
+          quoteOut={quote && quotedAmount === amountNum ? fromUnits(quote.amountOut) : null} price={quote?.priceAfter ?? null} error={error} busy={busy}
           classic={classicQuote ? { amountOut: classicQuote.amountOut, price: classicQuote.priceAfter } : null}
           onTokenIn={pickIn} onTokenOut={pickOut} onAmount={setAmount} onFlip={flip} onCommit={commit} onReset={reset} />
         <ReservesTable reserves={reserves} prices={prices} tvl={tvl} />

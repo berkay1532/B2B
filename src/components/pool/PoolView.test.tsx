@@ -38,6 +38,18 @@ describe("PoolView", () => {
     expect(classic).toBeLessThan(orbital);
   });
 
+  it("never quotes past what the pool can fill at the max slider amount", async () => {
+    render(<PoolView />);
+    await waitFor(() => expect(screen.getByText("$30.00M")).toBeInTheDocument());
+    const slider = screen.getByLabelText("amount slider") as HTMLInputElement;
+    const max = slider.max;
+    fireEvent.change(slider, { target: { value: max } });
+    fireEvent.change(screen.getByLabelText("amount in"), { target: { value: max } });
+    await waitFor(() => expect(screen.getByTestId("preview-badge")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("quote-out").textContent).toMatch(/\$/));
+    expect(screen.queryByText(/InsufficientLiquidity/)).not.toBeInTheDocument();
+  });
+
   it("keeps the classic dot on-chart at a large slider amount", async () => {
     render(<PoolView />);
     await waitFor(() => expect(screen.getByText("$30.00M")).toBeInTheDocument());

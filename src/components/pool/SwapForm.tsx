@@ -11,8 +11,8 @@ export interface SwapFormProps {
   onFlip(): void; onCommit(): void; onReset(): void;
 }
 
-export function SwapForm(p: SwapFormProps) {
-  const Sel = ({ value, onChange }: { value: string; onChange(v: string): void }) => (
+function TokenSelect({ value, onChange }: { value: string; onChange(v: string): void }) {
+  return (
     <div className="flex gap-1">
       {TOKENS.map((t) => (
         <button key={t.code} type="button" onClick={() => onChange(t.code)}
@@ -20,15 +20,18 @@ export function SwapForm(p: SwapFormProps) {
       ))}
     </div>
   );
+}
+
+export function SwapForm(p: SwapFormProps) {
   return (
     <div className="flex flex-col gap-3 font-mono text-sm">
-      <div className="flex items-center justify-between"><span className="text-muted">PAY</span><Sel value={p.tokenIn} onChange={p.onTokenIn} /></div>
+      <div className="flex items-center justify-between"><span className="text-muted">PAY</span><TokenSelect value={p.tokenIn} onChange={p.onTokenIn} /></div>
       <input aria-label="amount in" inputMode="decimal" value={p.amount} onChange={(e) => p.onAmount(e.target.value)}
         placeholder="0.00" className="w-full rounded border border-line bg-transparent px-3 py-2 text-lg" />
       <input aria-label="amount slider" type="range" min={0} max={p.maxAmount} step={p.maxAmount / 1000} value={Number(p.amount) || 0}
         onChange={(e) => p.onAmount(e.target.value)} className="w-full" />
       <button type="button" onClick={p.onFlip} className="self-center text-muted">⇅</button>
-      <div className="flex items-center justify-between"><span className="text-muted">RECEIVE</span><Sel value={p.tokenOut} onChange={p.onTokenOut} /></div>
+      <div className="flex items-center justify-between"><span className="text-muted">RECEIVE</span><TokenSelect value={p.tokenOut} onChange={p.onTokenOut} /></div>
       <div className="rounded border border-line px-3 py-2">
         <div data-testid="quote-out" data-value={p.quoteOut ?? ""} className="text-lg">{p.quoteOut === null ? "—" : formatUsd(p.quoteOut)}</div>
         <div className="text-xs text-muted">{p.price === null ? "" : `1 ${p.tokenIn} ≈ ${(1 / p.price).toFixed(5)} ${p.tokenOut}`}</div>
@@ -41,7 +44,7 @@ export function SwapForm(p: SwapFormProps) {
       <div className="flex gap-2">
         <button type="button" disabled={p.busy || p.quoteOut === null} onClick={p.onCommit}
           className="flex-1 rounded bg-accent px-3 py-2 text-bg disabled:opacity-40">COMMIT SWAP</button>
-        <button type="button" onClick={p.onReset} className="rounded border border-line px-3 py-2 text-muted">RESET</button>
+        <button type="button" disabled={p.busy} onClick={p.onReset} className="rounded border border-line px-3 py-2 text-muted disabled:opacity-40">RESET</button>
       </div>
     </div>
   );
