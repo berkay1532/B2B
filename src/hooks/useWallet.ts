@@ -1,100 +1,76 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { usePasskeyWallet, toSembolError, type PasskeyWalletContextValue } from "@sembol/passkey-react";
 
-const STORAGE_KEY = "orbital.address";
-
-// Minimal shape of the kit we rely on, declared locally so this module never
-// statically imports (or types against) the real package — the package is
-// only touched inside the lazy `import()` below, on user interaction.
-type Kit = {
-  authModal(): Promise<{ address: string }>;
-};
-
-let kitPromise: Promise<Kit> | null = null;
-let kitOverride: Kit | null = null;
-
-async function getKit(): Promise<Kit> {
-  if (kitOverride) return kitOverride;
-  if (!kitPromise) {
-    kitPromise = (async () => {
-      const [{ StellarWalletsKit, Networks }, { defaultModules }] = await Promise.all([
-        import("@creit.tech/stellar-wallets-kit"),
-        import("@creit.tech/stellar-wallets-kit/modules/utils"),
-      ]);
-      StellarWalletsKit.init({ network: Networks.TESTNET, modules: defaultModules() });
-      return StellarWalletsKit as unknown as Kit;
-    })();
+/**
+ * `usePasskeyWallet()` throws when called outside `<PasskeyWalletProvider>` (see
+ * `usePasskeyWalletContext` in the kit). We want `useWallet()` to be safe to call from any
+ * component — including ones rendered in tests without the provider — so we catch that
+ * throw and fall back to a disconnected shape instead of crashing the caller.
+ *
+ * This is safe with respect to the rules of hooks: the kit's implementation is just
+ * `useContext(...)` followed by a plain `if (!ctx) throw ...`, so the underlying hook call
+ * always executes in the same order every render — only the (non-hook) throw afterwards is
+ * conditional on whether a provider is present.
+ */
+function useOptionalPasskeyWallet(): PasskeyWalletContextValue | null {
+  try {
+    return usePasskeyWallet();
+  } catch {
+    return null;
   }
-  return kitPromise;
 }
 
 /**
- * Test-only escape hatch: inject a fake kit so tests never trigger the real
- * dynamic import. Pass `null` to restore normal (lazy, real-kit) behavior.
+ * Thin wrapper around Sembol's passkey smart-wallet hook, shaped for this app's needs.
+ * Public shape kept stable (`address`, `error`, `connect`, `disconnect`) so consumers like
+ * `PoolView` don't need to change; `createWallet` and `status` are additive.
  */
-export function __setKitForTests(kit: Kit | null): void {
-  kitOverride = kit;
-  kitPromise = null;
-}
-
-function isUserClosedModal(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as { code?: unknown; message?: unknown };
-  if (e.code === -1) return true;
-  // Intentional heuristic: some wallet modules in the kit reject with a plain Error
-  // (no `code`) when the user closes the modal, so we also match on message text.
-  // This can false-positive on an unrelated error that happens to say "closed", but
-  // that's an acceptable tradeoff for a demo — worst case it swallows a real error
-  // instead of surfacing one that isn't.
-  return typeof e.message === "string" && e.message.toLowerCase().includes("closed");
-}
-
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (err && typeof err === "object" && "message" in err) return String((err as { message: unknown }).message);
-  return String(err);
-}
-
 export function useWallet() {
-  const [address, setAddress] = useState<string | null>(null);
+  const ctx = useOptionalPasskeyWallet();
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    try {
-      const a = localStorage.getItem(STORAGE_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time hydration from localStorage on mount, not derived from props/state
-      if (a) setAddress(a);
-    } catch {
-      // localStorage unavailable (private mode, SSR edge cases) — stay disconnected
-    }
-  }, []);
-
   const connect = useCallback(async () => {
-    try {
-      const kit = await getKit();
-      const { address } = await kit.authModal();
-      setAddress(address);
-      setError(null);
-      try {
-        localStorage.setItem(STORAGE_KEY, address);
-      } catch {
-        // ignore persistence failures
-      }
-    } catch (err) {
-      if (isUserClosedModal(err)) return;
-      setError(errorMessage(err));
-    }
-  }, []);
-
-  const disconnect = useCallback(() => {
-    setAddress(null);
+    if (!ctx) return;
     setError(null);
     try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // ignore persistence failures
+      const result = await ctx.connect();
+      if (!result) {
+        setError("No passkey wallet on this device yet");
+      }
+    } catch (err) {
+      const sembolError = toSembolError(err);
+      // User-cancelled WebAuthn prompts (closed the dialog, backed out) are a normal
+      // non-event, not an error worth surfacing.
+      if (sembolError.code === "user_cancelled") return;
+      setError(sembolError.message);
     }
-  }, []);
+  }, [ctx]);
 
-  return { address, error, connect, disconnect };
+  const createWallet = useCallback(async () => {
+    if (!ctx) return;
+    setError(null);
+    try {
+      await ctx.createWallet();
+    } catch (err) {
+      const sembolError = toSembolError(err);
+      if (sembolError.code === "user_cancelled") return;
+      setError(sembolError.message);
+    }
+  }, [ctx]);
+
+  const disconnect = useCallback(() => {
+    if (!ctx) return;
+    setError(null);
+    void ctx.disconnect();
+  }, [ctx]);
+
+  return {
+    address: ctx?.address ?? null,
+    error,
+    status: ctx?.status ?? "disconnected",
+    connect,
+    createWallet,
+    disconnect,
+  };
 }

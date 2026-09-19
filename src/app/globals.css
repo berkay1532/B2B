@@ -86,3 +86,16 @@ body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); }
 @media (prefers-reduced-motion: reduce) {
   .orbital-ring-pulse { animation: none; }
 }
+
+/*
+ * Sembol passkey wallet kit (@sembol/passkey-react): the `theme` prop passed to
+ * `PasskeyWalletProvider` (see src/components/wallet/WalletProvider.tsx) already maps
+ * accent/surface/border/font onto our tokens via `--sembol-*` custom properties. This is
+ * just a minimal backstop for the couple of vars the theme prop doesn't expose, so the
+ * connect/create modal reads as part of the Observatory surface rather than the kit's
+ * light-mode default.
+ */
+[data-sembol-theme="dark"] {
+  --sembol-color-overlay: rgb(5 7 13 / 0.78);
+  --sembol-shadow-lg: 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+}

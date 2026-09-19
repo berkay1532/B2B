@@ -1,6 +1,24 @@
 import "@testing-library/jest-dom/vitest";
-import { afterEach } from "vitest";
+import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
+
+// `@sembol/passkey-react` pulls in `smart-account-kit`, which runs Stellar-SDK hashing at
+// module-import time; that trips over jsdom's crypto shims (unrelated to our wallet logic)
+// the moment ANYTHING transitively imports it — including components like `PoolView` that
+// merely call `useWallet()` and never touch the kit directly. Stub it globally here so no
+// test file needs its own copy of this mock just to import something that imports
+// `useWallet`. Test files that care about wallet *behavior* (useWallet.test.tsx,
+// ConnectButton.test.tsx) override this with their own more detailed `vi.mock`.
+vi.mock("@sembol/passkey-react", () => ({
+  usePasskeyWallet: () => {
+    throw new Error("Sembol hooks and components must be used inside <PasskeyWalletProvider />.");
+  },
+  toSembolError: (err: unknown) => {
+    if (err && typeof err === "object" && "code" in err) return err;
+    if (err instanceof Error) return { code: "unknown", message: err.message };
+    return { code: "unknown", message: String(err) };
+  },
+}));
 
 if (typeof window !== "undefined") {
   // Node >= 25 ships an experimental global `localStorage` that shadows jsdom's.

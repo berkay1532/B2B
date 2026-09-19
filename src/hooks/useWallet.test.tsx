@@ -1,57 +1,112 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { renderHook, waitFor, act } from "@testing-library/react";
-import { useWallet, __setKitForTests } from "./useWallet";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { renderHook, act } from "@testing-library/react";
+import { useWallet } from "./useWallet";
+
+const { usePasskeyWallet } = vi.hoisted(() => ({ usePasskeyWallet: vi.fn() }));
+
+vi.mock("@sembol/passkey-react", () => ({
+  usePasskeyWallet: () => usePasskeyWallet(),
+  toSembolError: (err: unknown) => {
+    if (err && typeof err === "object" && "code" in err) return err;
+    if (err instanceof Error) return { code: "unknown", message: err.message };
+    return { code: "unknown", message: String(err) };
+  },
+}));
+
+function makeCtx(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    kit: null,
+    status: "disconnected",
+    address: null,
+    credentialId: null,
+    isConnected: false,
+    error: null,
+    capabilities: null,
+    config: {},
+    txEpoch: 0,
+    signals: { on: vi.fn(), emit: vi.fn() },
+    connect: vi.fn(),
+    createWallet: vi.fn(),
+    disconnect: vi.fn(),
+    fund: vi.fn(),
+    ...overrides,
+  };
+}
 
 describe("useWallet", () => {
   beforeEach(() => {
-    localStorage.clear();
+    usePasskeyWallet.mockReset();
   });
 
-  afterEach(() => {
-    __setKitForTests(null);
-  });
-
-  it("starts disconnected", () => {
-    const { result } = renderHook(() => useWallet());
-    expect(result.current.address).toBeNull();
-  });
-
-  it("picks up a pre-seeded address from localStorage on mount", async () => {
-    localStorage.setItem("orbital.address", "GABC1234567890XYZ");
-    const { result } = renderHook(() => useWallet());
-    await waitFor(() => expect(result.current.address).toBe("GABC1234567890XYZ"));
-  });
-
-  it("disconnect clears the address and localStorage", async () => {
-    localStorage.setItem("orbital.address", "GABC1234567890XYZ");
-    const { result } = renderHook(() => useWallet());
-    await waitFor(() => expect(result.current.address).toBe("GABC1234567890XYZ"));
-    act(() => result.current.disconnect());
-    expect(result.current.address).toBeNull();
-    expect(localStorage.getItem("orbital.address")).toBeNull();
-  });
-
-  it("swallows a user-closed-modal rejection from connect() without setting error", async () => {
-    __setKitForTests({
-      authModal: () => Promise.reject({ code: -1, message: "The user closed the modal." }),
+  it("returns a disconnected shape when there is no PasskeyWalletProvider (hook throws)", () => {
+    usePasskeyWallet.mockImplementation(() => {
+      throw new Error("Sembol hooks and components must be used inside <PasskeyWalletProvider />.");
     });
     const { result } = renderHook(() => useWallet());
+    expect(result.current.address).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  it("reports the connected smart-account address from the kit", () => {
+    usePasskeyWallet.mockReturnValue(
+      makeCtx({ address: "CABC1234567890XYZ", status: "connected", isConnected: true }),
+    );
+    const { result } = renderHook(() => useWallet());
+    expect(result.current.address).toBe("CABC1234567890XYZ");
+  });
+
+  it("sets a hint error when connect() resolves null (no wallet found)", async () => {
+    const connect = vi.fn().mockResolvedValue(null);
+    usePasskeyWallet.mockReturnValue(makeCtx({ connect }));
+    const { result } = renderHook(() => useWallet());
     await act(async () => {
-      await expect(result.current.connect()).resolves.toBeUndefined();
+      await result.current.connect();
+    });
+    expect(connect).toHaveBeenCalled();
+    expect(result.current.address).toBeNull();
+    expect(result.current.error).toBe("No passkey wallet on this device yet");
+  });
+
+  it("swallows a user-cancelled WebAuthn rejection from connect() without setting error", async () => {
+    const connect = vi.fn().mockRejectedValue({ code: "user_cancelled", message: "cancelled" });
+    usePasskeyWallet.mockReturnValue(makeCtx({ connect }));
+    const { result } = renderHook(() => useWallet());
+    await act(async () => {
+      await result.current.connect();
     });
     expect(result.current.address).toBeNull();
     expect(result.current.error).toBeNull();
   });
 
-  it("stores a non-cancel rejection from connect() as error", async () => {
-    __setKitForTests({
-      authModal: () => Promise.reject(new Error("boom")),
-    });
+  it("stores a generic rejection from connect() as error", async () => {
+    const connect = vi.fn().mockRejectedValue({ code: "network_error", message: "boom" });
+    usePasskeyWallet.mockReturnValue(makeCtx({ connect }));
     const { result } = renderHook(() => useWallet());
     await act(async () => {
-      await expect(result.current.connect()).resolves.toBeUndefined();
+      await result.current.connect();
     });
-    expect(result.current.address).toBeNull();
     expect(result.current.error).toBe("boom");
+  });
+
+  it("stores a generic rejection from createWallet() as error", async () => {
+    const createWallet = vi.fn().mockRejectedValue({ code: "unknown", message: "deploy failed" });
+    usePasskeyWallet.mockReturnValue(makeCtx({ createWallet }));
+    const { result } = renderHook(() => useWallet());
+    await act(async () => {
+      await result.current.createWallet();
+    });
+    expect(result.current.error).toBe("deploy failed");
+  });
+
+  it("disconnect() calls through to the kit", () => {
+    const disconnect = vi.fn();
+    usePasskeyWallet.mockReturnValue(
+      makeCtx({ address: "CABC1234567890XYZ", status: "connected", disconnect }),
+    );
+    const { result } = renderHook(() => useWallet());
+    act(() => {
+      result.current.disconnect();
+    });
+    expect(disconnect).toHaveBeenCalled();
   });
 });

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import { Backdrop } from "@/components/layout/Backdrop";
+import { WalletProvider } from "@/components/wallet/WalletProvider";
 import "./globals.css";
 
 const instrumentSans = Instrument_Sans({
@@ -27,8 +28,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${instrumentSans.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <Backdrop />
-        <main className="relative min-h-screen text-fg">{children}</main>
+        <WalletProvider>
+          <Backdrop />
+          <main className="relative min-h-screen text-fg">{children}</main>
+        </WalletProvider>
       </body>
     </html>
   );
