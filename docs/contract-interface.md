@@ -392,3 +392,54 @@ tolerance appropriate for i128-vs-float64 comparison (see §2).
 These were produced by running `quote`/`maxFillable` from
 `src/lib/orbital/swap.ts` directly against ticks built with `createTick`
 from `src/lib/orbital/tick.ts`, using the seed parameters in §3.
+
+## 7. Funding the smart account (C… address) with test tokens
+
+The frontend's wallet is now a [Sembol](https://www.npmjs.com/package/@sembol/passkey-react)
+passkey smart account (`src/hooks/useWallet.ts`, `src/components/wallet/WalletProvider.tsx`):
+`useWallet().address` is a Soroban contract address (`C…`), not a classic Stellar account
+(`G…`). This matters for anyone funding the demo wallet or the pool's token balances by hand.
+
+**Classic payment operations (`Operation.payment`, Horizon `/payments`) cannot target a `C…`
+address** — those only move classic-ledger balances between `G…` accounts. To move a SEP-41 /
+classic-backed asset to a smart account, go through that asset's **Stellar Asset Contract
+(SAC)**, which exposes classic balances as a Soroban token contract that can `transfer` to any
+address, including `C…` ones:
+
+```bash
+# Find (or deploy) the SAC for an existing classic asset:
+stellar contract id asset --network testnet --asset USDC:<ISSUER_G_ADDRESS>
+# -> prints the SAC's C… contract id; if this errors because the SAC hasn't been
+#    deployed yet on testnet:
+stellar contract asset deploy --network testnet --source <G_SECRET> --asset USDC:<ISSUER_G_ADDRESS>
+
+# Move funds from a classic G… holder to the smart account's C… address:
+stellar contract invoke --network testnet --source <G_SECRET> --id <SAC_ID> -- \
+  transfer --from <G_ADDRESS> --to <SMART_ACCOUNT_C_ADDRESS> --amount <STROOPS>
+```
+
+For the team's own test tokens (i.e. assets we issue ourselves), the issuer can skip the
+transfer step entirely and **mint straight to the `C…` address** via the SAC's `mint`
+function — no trustline is needed on the contract side (trustlines are a classic-ledger
+concept; a Soroban token contract just tracks its own balance map):
+
+```bash
+stellar contract invoke --network testnet --source <ISSUER_G_SECRET> --id <SAC_ID> -- \
+  mint --to <SMART_ACCOUNT_C_ADDRESS> --amount <STROOPS>
+```
+
+Reading a smart account's balance is the same SAC call any Soroban token supports:
+
+```bash
+stellar contract invoke --network testnet --source <ANY_G_SECRET> --id <SAC_ID> -- \
+  balance --id <SMART_ACCOUNT_C_ADDRESS>
+```
+
+**Spending from the smart account** (e.g. the pool's `token.transfer(from = C…, …)` inside
+`swap`/`deposit`) is authorized differently than a classic account: instead of an Ed25519
+signature over the transaction, the Soroban runtime invokes the smart account contract's
+`__check_auth`, which the account's WASM (deployed by Sembol/`smart-account-kit`) satisfies
+with a WebAuthn passkey signature. The frontend never constructs this by hand — Sembol's
+`useSignTransaction().signAndSubmit` (or the `<SignTransactionModal />` component) builds the
+transaction, prompts Face ID / Touch ID / Windows Hello for the passkey ceremony, attaches the
+resulting auth entry, re-simulates, and submits.

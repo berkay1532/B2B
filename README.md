@@ -41,9 +41,15 @@ Copy `.env.example` to `.env.local`:
 | `NEXT_PUBLIC_RPC_URL` | Soroban RPC endpoint, only used when `soroban`. Defaults to `https://soroban-testnet.stellar.org`. |
 | `NEXT_PUBLIC_POOL_CONTRACT_ID` | Deployed pool contract id, only used when `soroban`. |
 
-Wallet connection uses `@creit.tech/stellar-wallets-kit` 2.x against testnet
-(Freighter and others); it works in mock mode too (the address shows, swaps
-just don't sign).
+Wallet connection uses `@sembol/passkey-react` against testnet: connecting
+creates or restores a Sembol **passkey smart wallet** (an OpenZeppelin smart
+account, signed with Face ID / Touch ID / Windows Hello — no seed phrase,
+no browser extension). Passkeys are scoped per domain, so a wallet created
+on `localhost` won't show up on a deployed demo domain (and vice versa) —
+create the demo wallet on whichever domain you're actually testing against.
+It works in mock mode too (the address shows, swaps just don't sign). See
+`docs/contract-interface.md` §7 for how to fund a smart account's `C…`
+address with test tokens.
 
 The visual direction — dark "Observatory" theme, tick-plane rings, glow
 accents — follows `docs/design/observatory-stage-mockup.html`, the approved
