@@ -1,10 +1,6 @@
 import { Header } from "@/components/layout/Header";
+import { PoolView } from "@/components/pool/PoolView";
 
-export default function Home() {
-  return (
-    <>
-      <Header />
-      <div className="p-6 font-mono">pool</div>
-    </>
-  );
+export default function Page() {
+  return (<><Header /><PoolView /></>);
 }

@@ -94,5 +94,8 @@ export class MockPoolClient implements PoolClient {
 
   async reset() { this.seed(); this.notify(); }
 
+  /** Mock only: math-level ticks for the visualizations. */
+  getTicks(): Tick[] { return this.ticks.map(cloneTick); }
+
   subscribe(cb: (s: PoolState) => void) { this.listeners.add(cb); return () => { this.listeners.delete(cb); }; }
 }
