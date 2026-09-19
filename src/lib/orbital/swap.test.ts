@@ -77,6 +77,8 @@ describe("quote", () => {
     const back = quote(out.ticks, 1, 0, 1000);
     expect(back.ticks[0].state).toBe("interior");
     expect(back.amountOut).toBeGreaterThan(1000); // token0 is cheap now
+    // reactivating the tick on this reverse trade must not itself count as a crossing
+    expect(back.ticksCrossed).toBe(0);
   });
   it("pool price at the equal point is 1", () => {
     expect(poolPrice(seed(), 0, 2)).toBeCloseTo(1, 12);

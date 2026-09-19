@@ -28,7 +28,9 @@ export function attackPool(): Tick[] {
 
 const IN = 0, OUT = 1;
 
-export function orbitalOutcome(budget: number): { price: number; capped: boolean; spent: number; received: number; maxSpend: number } {
+export interface OrbitalOutcome { price: number; capped: boolean; spent: number; received: number; maxSpend: number }
+
+export function orbitalOutcome(budget: number): OrbitalOutcome {
   const pool = attackPool();
   const maxSpend = maxFillable(pool, IN, OUT);
   if (!(budget > 0)) return { price: 1, capped: false, spent: 0, received: 0, maxSpend };

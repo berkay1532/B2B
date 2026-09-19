@@ -75,11 +75,12 @@ ui (app/, components/)
 `lib/orbital` is pure and chain-agnostic (`geometry.ts`, `tick.ts`,
 `swap.ts`, `types.ts`, `projection.ts`). `lib/pool` is the only place that
 converts between float64 token units and `bigint` 7-decimal (stroop-scale)
-units, and the only place that knows about `PoolError`. The UI never touches
-`lib/orbital` types directly through the network boundary — only through
-`MockPoolClient`'s escape hatch for the visualizations (`getTicks()`), which
-is display-only and will be replaced once the Soroban client can return
-per-tick reserves.
+units, and the only place that knows about `PoolError`; it remains the only
+path for state, quotes and swaps. The UI does also import `lib/orbital`
+directly in a few places (`PoolView`, `TwoTokenCurve`, `TickPlanes`) — that's
+deliberate: it's display-only preview math and projection (the live slider
+preview, the two-token curve, the tick-plane rings), never a substitute for
+the client round trip that actually commits a swap.
 
 ## v1 simplification
 
@@ -91,7 +92,14 @@ rejoins the interior set for a given swap only when that swap moves it
 inward (`x[tokenIn] < x[tokenOut]`). This under-quotes slightly relative to
 the paper and is the one place the contract's output may diverge from the
 TS reference — see `docs/contract-interface.md` for the exact formulas and
-calibration numbers a contract test should assert against.
+calibration numbers a contract test should assert against. The readable
+pool price (`pricingTicks`) is the interior ticks if any exist, otherwise
+the single widest-depeg boundary tick.
+
+`/attack` runs its own smaller 3-tick pool (three ticks seeded at 500,000
+tokens each), not the $30M mock pool the `/` page uses, so the pool side of
+that comparison exhausts at a scale that fits on the same chart as the thin
+orderbook.
 
 ## Credits
 

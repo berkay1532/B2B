@@ -1,6 +1,7 @@
 import { formatUsd } from "@/lib/pool";
+import type { OrbitalOutcome } from "@/lib/attack/orderbook";
 
-export function OrbitalPanel({ o }: { o: { price: number; capped: boolean; spent: number; received: number; maxSpend: number } }) {
+export function OrbitalPanel({ o }: { o: OrbitalOutcome }) {
   return (
     <section className="border border-line p-4 font-mono text-sm">
       <h2 className="mb-2 text-xs text-muted">{"// ORBITAL POOL · 10% OUTER TICK"}</h2>

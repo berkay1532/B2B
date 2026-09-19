@@ -41,6 +41,11 @@ function isUserClosedModal(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const e = err as { code?: unknown; message?: unknown };
   if (e.code === -1) return true;
+  // Intentional heuristic: some wallet modules in the kit reject with a plain Error
+  // (no `code`) when the user closes the modal, so we also match on message text.
+  // This can false-positive on an unrelated error that happens to say "closed", but
+  // that's an acceptable tradeoff for a demo — worst case it swallows a real error
+  // instead of surfacing one that isn't.
   return typeof e.message === "string" && e.message.toLowerCase().includes("closed");
 }
 

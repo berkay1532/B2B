@@ -74,6 +74,10 @@ interface Quote {
 - `depeg_bps` is **the allowed drop below peg**, in basis points, not an
   absolute price. `depeg_bps = 100` means the tick's coins may fall to
   `0.99` before the tick exits to boundary. `p = 1 - depeg_bps / 10000`.
+- `toUnits`'s `n * 1e7` loses low-order digits once it exceeds
+  `Number.MAX_SAFE_INTEGER` (2^53, ~9.0e15 stroops); this is safe for every
+  amount and reserve in the demo, but the 10 bps tick's `TickInfo.radius`
+  (~6.5e9 tokens -> ~6.5e16 stroops) is imprecise in its last digits.
 
 ## 3. The mock's seed
 
@@ -208,7 +212,9 @@ else: pricingTicks = [the single ticks with the largest depegBps]  // widest bou
 
 If `quote()` returns a price, the contract must use exactly this rule:
 interior ticks if any exist, otherwise the single widest-depeg boundary
-tick, never an empty set (unless there are no ticks at all).
+tick, never an empty set (unless there are no ticks at all). Tie-break: on
+equal `depegBps`, the first such tick in list order wins (a strict `>`
+comparison against the running max, so a later tie never replaces it).
 
 ### 4.10 The invariant
 
