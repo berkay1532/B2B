@@ -27,6 +27,10 @@ npm test        # vitest, lib/orbital + adapter + smoke tests
 npm run build   # production build
 ```
 
+Tests are verified on Node 24 (`.nvmrc` pins this version — `nvm use`). Node
+25 ships an experimental global `localStorage` that shadows jsdom's;
+`src/test/setup.ts` works around it, but Node 24 is the checked baseline.
+
 ## Environment variables
 
 Copy `.env.example` to `.env.local`:

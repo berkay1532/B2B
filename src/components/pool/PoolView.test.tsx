@@ -1,8 +1,6 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { describe, it, expect } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { PoolView } from "./PoolView";
-
-afterEach(cleanup);
 
 describe("PoolView", () => {
   it("previews live, then commits", async () => {
