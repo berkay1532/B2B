@@ -13,7 +13,7 @@ export function Backdrop() {
         </radialGradient>
       </defs>
       <rect width="1440" height="900" fill="url(#observatory-vignette)" />
-      <g fill="none" stroke="#5b7bff" strokeOpacity="0.07" strokeWidth="1">
+      <g fill="none" stroke="var(--orbit-line)" strokeOpacity="0.07" strokeWidth="1">
         <ellipse cx="520" cy="400" rx="760" ry="250" transform="rotate(-14 520 400)" />
         <ellipse cx="520" cy="400" rx="560" ry="180" transform="rotate(-14 520 400)" />
         <ellipse cx="520" cy="400" rx="980" ry="330" transform="rotate(-14 520 400)" />

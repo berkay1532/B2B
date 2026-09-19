@@ -10,6 +10,7 @@
   --accent: #37f0d0;
   --boundary: #ffb454;
   --ghost: #3b4661;
+  --orbit-line: #5b7bff;
   --token-0: #60a5fa;
   --token-1: #34d399;
   --token-2: #f472b6;
@@ -25,6 +26,7 @@
   --color-accent: var(--accent);
   --color-boundary: var(--boundary);
   --color-ghost: var(--ghost);
+  --color-orbit-line: var(--orbit-line);
   --color-token-0: var(--token-0);
   --color-token-1: var(--token-1);
   --color-token-2: var(--token-2);
@@ -38,11 +40,6 @@ body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); }
   0% { stroke-opacity: 1; }
   50% { stroke-opacity: 0.5; }
   100% { stroke-opacity: 1; }
-}
-
-@keyframes orbital-fade {
-  0% { opacity: 0.6; }
-  100% { opacity: 0; }
 }
 
 /* One-shot ring pulse, applied for 900ms when a tick flips interior -> boundary. */

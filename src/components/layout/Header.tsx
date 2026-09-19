@@ -33,7 +33,7 @@ export function Header({ right }: { right?: React.ReactNode }) {
             cy="13"
             rx="11"
             ry="4.5"
-            stroke="#5b7bff"
+            stroke="var(--orbit-line)"
             strokeOpacity="0.6"
             strokeWidth="1.2"
             transform="rotate(35 13 13)"
