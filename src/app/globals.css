@@ -22,7 +22,8 @@
   --color-token-0: var(--token-0);
   --color-token-1: var(--token-1);
   --color-token-2: var(--token-2);
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-body { background: var(--bg); color: var(--fg); }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); }
