@@ -308,6 +308,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
   - `invariantResidual(t: Tick): number` relative residual `(sum (R-x_i)^2 - R^2) / R^2`
   - `marginalPrice(t: Tick, i: number, j: number): number` price of i in units of j = `(R-x_i)/(R-x_j)`
   - `poolPrice(ticks: Tick[], i: number, j: number): number` = `sum_t (R_t - x_t,i) / sum_t (R_t - x_t,j)`
+  - `pricingTicks(ticks: Tick[]): Tick[]` the ticks whose marginal price is the pool's readable price: every interior tick, or, when none is interior, the single boundary tick with the largest `depegBps` (the last liquidity that traded). Frozen boundary ticks with huge radii would otherwise dominate the sum and hide the real marginal price.
   - `poolRealReserves(ticks: Tick[]): number[]`
 
 - [ ] **Step 1: Write the failing test**
@@ -315,7 +316,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 `src/lib/orbital/tick.test.ts`:
 ```ts
 import { describe, it, expect } from "vitest";
-import { createTick, sumX, planeSum, realReserves, invariantResidual, marginalPrice, poolPrice, poolRealReserves } from "./tick";
+import { createTick, sumX, planeSum, realReserves, invariantResidual, marginalPrice, poolPrice, poolRealReserves, pricingTicks } from "./tick";
 
 describe("tick", () => {
   it("starts at the equal point with real reserves equal to the deposit", () => {
@@ -338,6 +339,14 @@ describe("tick", () => {
   it("pool real reserves sum over ticks", () => {
     const ticks = [createTick("a", 100, 1000, 3), createTick("b", 1000, 500, 3)];
     expect(poolRealReserves(ticks)[1]).toBeCloseTo(1500, 6);
+  });
+  it("pricingTicks prefers interior ticks, else the widest boundary tick", () => {
+    const a = createTick("a", 100, 1000, 3), b = createTick("b", 1000, 1000, 3);
+    expect(pricingTicks([a, b]).map((t) => t.id)).toEqual(["a", "b"]);
+    a.state = "boundary";
+    expect(pricingTicks([a, b]).map((t) => t.id)).toEqual(["b"]);
+    b.state = "boundary";
+    expect(pricingTicks([a, b]).map((t) => t.id)).toEqual(["b"]);
   });
 });
 ```
@@ -391,6 +400,15 @@ export function poolPrice(ticks: Tick[], i: number, j: number): number {
   return num / den;
 }
 
+/** Ticks whose marginal price is the pool's readable price. */
+export function pricingTicks(ticks: Tick[]): Tick[] {
+  const interior = ticks.filter((t) => t.state === "interior");
+  if (interior.length > 0) return interior;
+  if (ticks.length === 0) return [];
+  const widest = ticks.reduce((a, t) => (t.depegBps > a.depegBps ? t : a), ticks[0]);
+  return [widest];
+}
+
 export function poolRealReserves(ticks: Tick[]): number[] {
   const n = ticks[0]?.x.length ?? 0;
   const out = Array.from({ length: n }, () => 0);
@@ -426,7 +444,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Produces:
   - `applySwap(t: Tick, i: number, j: number, dIn: number): number` mutates `t`, returns amount out
   - `deltaToPlane(t: Tick, i: number, j: number): number` input of token i that puts the tick exactly on its plane, `Infinity` if unreachable
-  - `quote(ticks: Tick[], tokenIn: number, tokenOut: number, amountIn: number): QuoteResult` pure (returns copies)
+  - `quote(ticks: Tick[], tokenIn: number, tokenOut: number, amountIn: number): QuoteResult` pure (returns copies); `priceBefore`/`priceAfter` are computed over `pricingTicks(...)`
   - `maxFillable(ticks: Tick[], tokenIn: number, tokenOut: number): number` largest input that does not throw
 
 - [ ] **Step 1: Write the failing test**
@@ -453,7 +471,7 @@ describe("quote", () => {
     expect(q.ticksCrossed).toBe(0);
   });
   it("keeps every tick on its sphere", () => {
-    const q = quote(seed(), 0, 1, 3_000_000);
+    const q = quote(seed(), 0, 1, 7_000_000);
     for (const t of q.ticks) expect(invariantResidual(t)).toBeLessThan(1e-9);
   });
   it("does not mutate the input ticks", () => {
@@ -463,7 +481,9 @@ describe("quote", () => {
     ticks.forEach((t, i) => expect(t.x).toEqual(before[i]));
   });
   it("flips ticks to boundary from tightest to widest", () => {
-    const q = quote(seed(), 0, 1, 2_000_000);
+    // in the seed pool the 10 bps tick lands on its plane near $2.2M of input,
+    // the 100 bps tick near $5M; $7M leaves two or three ticks at boundary
+    const q = quote(seed(), 0, 1, 7_000_000);
     const states = q.ticks.map((t) => t.state);
     expect(states[0]).toBe("boundary");
     // boundary ticks form a prefix of the list ordered by depegBps
@@ -524,7 +544,7 @@ Expected: FAIL, cannot resolve `./swap`.
 
 `src/lib/orbital/swap.ts`:
 ```ts
-import { cloneTick, planeSum, poolPrice, sumX } from "./tick";
+import { cloneTick, planeSum, poolPrice, pricingTicks, sumX } from "./tick";
 import { OrbitalError, type QuoteResult, type Tick } from "./types";
 
 const REL_EPS = 1e-12;
@@ -575,7 +595,7 @@ export function quote(ticks: Tick[], tokenIn: number, tokenOut: number, amountIn
   if (ticks.length === 0) throw new OrbitalError("InsufficientLiquidity", "no ticks");
 
   const work = ticks.map(cloneTick);
-  const priceBefore = poolPrice(work, tokenOut, tokenIn);
+  const priceBefore = poolPrice(pricingTicks(work), tokenOut, tokenIn);
 
   // A frozen boundary tick can trade again if this direction moves it inward.
   for (const t of work) {
@@ -614,7 +634,7 @@ export function quote(ticks: Tick[], tokenIn: number, tokenOut: number, amountIn
   }
   if (remaining > amountIn * REL_EPS) throw new OrbitalError("NoConvergence");
 
-  return { amountOut: out, ticksCrossed: crossed, ticks: work, priceBefore, priceAfter: poolPrice(work, tokenOut, tokenIn) };
+  return { amountOut: out, ticksCrossed: crossed, ticks: work, priceBefore, priceAfter: poolPrice(pricingTicks(work), tokenOut, tokenIn) };
 }
 
 /** Largest amountIn for which quote() does not throw (bisection, 60 rounds). */
@@ -1281,7 +1301,7 @@ describe("PoolView", () => {
     render(<PoolView />);
     await waitFor(() => expect(screen.getByText("$30.00M")).toBeInTheDocument());
     const input = screen.getByLabelText("amount in");
-    fireEvent.change(input, { target: { value: "1000000" } });
+    fireEvent.change(input, { target: { value: "6000000" } });
     await waitFor(() => expect(screen.getByTestId("quote-out").textContent).toMatch(/\$/));
     fireEvent.click(screen.getByText("COMMIT SWAP"));
     await waitFor(() => expect(screen.getAllByText("BOUNDARY").length).toBeGreaterThan(0));
@@ -1497,7 +1517,7 @@ import { usePool } from "@/hooks/usePool";
 import { TOKENS, tokenIndex } from "@/config/tokens";
 import { fromUnits, toUnits, PoolError, type Quote } from "@/lib/pool";
 import { ticksFromState } from "@/lib/pool/reconstruct";
-import { poolPrice, type Tick } from "@/lib/orbital";
+import { poolPrice, pricingTicks, type Tick } from "@/lib/orbital";
 import { TickPlanes } from "./TickPlanes";
 import { TwoTokenCurve } from "./TwoTokenCurve";
 import { SwapForm } from "./SwapForm";
@@ -1536,7 +1556,7 @@ export function PoolView() {
 
   const i = tokenIndex(tokenIn), j = tokenIndex(tokenOut);
   const numeraire = [0, 1, 2].find((k) => k !== i && k !== j) ?? 0;
-  const prices = ticks.length ? [0, 1, 2].map((k) => poolPrice(ticks, k, numeraire)) : [1, 1, 1];
+  const prices = ticks.length ? [0, 1, 2].map((k) => poolPrice(pricingTicks(ticks), k, numeraire)) : [1, 1, 1];
   const reserves = state.reserves.map(fromUnits);
 
   const commit = async () => {
@@ -1585,7 +1605,7 @@ export default function Page() {
 
 Run: `npx vitest run` then `npm run build`.
 Expected: all pass, build succeeds.
-Run `npm run dev`, open `http://localhost:3000`, type 6000000 into the amount, confirm the quote shows about $4.0M, commit, and confirm ticks show BOUNDARY and the dot leaves PEG. Note any visual defects in the commit message body; do not fix styling now.
+Run `npm run dev`, open `http://localhost:3000`, type 6000000 into the amount, confirm the quote shows about $5.96M (the 10 bps tick carries 1098x virtual depth, so a $6M swap barely moves price; that is correct), commit, and confirm the 10 and 100 bps ticks show BOUNDARY and the dot leaves PEG. Note any visual defects in the commit message body; do not fix styling now.
 
 - [ ] **Step 5: Commit**
 
