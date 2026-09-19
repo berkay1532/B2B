@@ -44,3 +44,48 @@ body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); }
   0% { opacity: 0.6; }
   100% { opacity: 0; }
 }
+
+/* One-shot ring pulse, applied for 900ms when a tick flips interior -> boundary. */
+.orbital-ring-pulse { animation: orbital-pulse 900ms ease-in-out 1; }
+
+/* Range input with a hand-drawn track: the element itself is transparent and only
+   contributes the thumb, so the filled bar, the amber tick markers and the glow can be
+   laid out behind it. */
+.orbital-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.orbital-slider::-webkit-slider-runnable-track { height: 3px; background: transparent; }
+.orbital-slider::-moz-range-track { height: 3px; background: transparent; }
+.orbital-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7.5px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 14px var(--accent);
+}
+.orbital-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: 0 0 14px var(--accent);
+}
+.orbital-slider:focus-visible { outline: none; }
+.orbital-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--line), 0 0 14px var(--accent); }
+.orbital-slider:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--line), 0 0 14px var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .orbital-ring-pulse { animation: none; }
+}

@@ -5,15 +5,23 @@ import { useWallet } from "@/hooks/useWallet";
 import { TOKENS, tokenIndex } from "@/config/tokens";
 import { fromUnits, toUnits, PoolError, type Quote } from "@/lib/pool";
 import { ticksFromState } from "@/lib/pool/reconstruct";
-import { capitalEfficiency, maxFillable, poolPrice, poolRealReserves, pricingTicks, quote as mathQuote, type Tick } from "@/lib/orbital";
+import { capitalEfficiency, maxFillable, poolPrice, poolRealReserves, pricingTicks, quote as mathQuote, tickLandingAmounts, type Tick } from "@/lib/orbital";
 import { cpQuote, classicApply, classicSeed } from "@/lib/classic/constantProduct";
 import { TickPlanes } from "./TickPlanes";
-import { TwoTokenCurve } from "./TwoTokenCurve";
-import { SwapForm } from "./SwapForm";
-import { ReservesTable } from "./ReservesTable";
-import { TicksTable } from "./TicksTable";
+import { ClassicCurve } from "./ClassicCurve";
+import { ControlBar } from "./ControlBar";
+import { Hud } from "./Hud";
 
 type WithTicks = { getTicks?: () => Tick[] };
+
+function PanelLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2.5 font-mono text-[11px] tracking-[0.16em] text-muted-2">
+      <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]" />
+      {children}
+    </div>
+  );
+}
 
 export function PoolView() {
   const { state, client } = usePool();
@@ -48,6 +56,8 @@ export function PoolView() {
     () => (ticks.length ? Math.max(Math.floor(maxFillable(ticks, i, j)), 1) : 1),
     [ticks, i, j],
   );
+  // amber slider markers: where each interior tick lands on its plane
+  const landingAmounts = useMemo(() => tickLandingAmounts(ticks, i, j), [ticks, i, j]);
   const amountNum = Number(amount);
   // synchronous, independent of the debounced client round trip — the classic row and
   // classic dot must move instantly with the slider, same as the Orbital preview does.
@@ -73,7 +83,7 @@ export function PoolView() {
     return () => clearTimeout(h);
   }, [amountNum, tokenIn, tokenOut, client]);
 
-  if (!state) return <div className="p-6 font-mono text-muted">loading…</div>;
+  if (!state) return <div className="p-9 font-mono text-xs text-muted">loading…</div>;
 
   const shown = previewTicks ?? ticks;                 // what every visual and table renders
   const ghost = previewTicks ? ticks : prevTicks;      // grey dot: committed state during preview, else last committed
@@ -103,26 +113,44 @@ export function PoolView() {
   const pickOut = (c: string) => { if (c === tokenIn) setTokenIn(tokenOut); setTokenOut(c); };
 
   return (
-    <div className="grid grid-cols-1 gap-6 p-6 lg:grid-cols-3">
-      <section className="border border-line p-4">
-        <h2 className="mb-2 flex justify-between font-mono text-xs text-muted"><span>{"// SECTION A · TICK PLANES"}</span>{previewTicks && <span data-testid="preview-badge" className="text-accent">PREVIEW</span>}</h2>
-        {shown.length > 0 && <TickPlanes ticks={shown} prev={ghost} />}
+    <div className="flex flex-col lg:h-[calc(100vh-60px)]">
+      <section
+        aria-label="Stage"
+        className="grid grid-cols-1 items-stretch gap-7 px-9 pt-2 lg:min-h-0 lg:flex-1 lg:grid-cols-[620px_1fr_300px]"
+      >
+        <div className="relative flex min-h-0 flex-col gap-1.5">
+          <PanelLabel>
+            TICK PLANES
+            {previewTicks && (
+              <span
+                data-testid="preview-badge"
+                className="ml-2 rounded-full border border-accent/35 px-2 py-0.5 text-[10px] tracking-[0.14em] text-accent"
+              >
+                PREVIEW
+              </span>
+            )}
+          </PanelLabel>
+          {shown.length > 0 && <TickPlanes ticks={shown} prev={ghost} previewing={!!previewTicks} />}
+        </div>
+
+        <div className="relative flex min-h-0 flex-col gap-1.5 lg:pt-10">
+          <PanelLabel>{tokenIn} / {tokenOut} CURVE</PanelLabel>
+          {shown.length > 0 && (
+            <ClassicCurve i={i} j={j} classic={classic ?? reserves} classicCurrent={classicPreview ?? classic ?? reserves} />
+          )}
+        </div>
+
+        <Hud reserves={reserves} prices={prices} tvl={tvl} ticks={tickRows} />
       </section>
-      <section className="border border-line p-4">
-        <h2 className="mb-2 font-mono text-xs text-muted">{"// SECTION B · "}{tokenIn}/{tokenOut}{" PLANE"}</h2>
-        {shown.length > 0 && (
-          <TwoTokenCurve committed={ticks} current={shown} i={i} j={j} prev={ghost} classic={classic ?? reserves} classicCurrent={classicPreview ?? classic ?? reserves} />
-        )}
-      </section>
-      <section className="flex flex-col gap-6 border border-line p-4">
-        <h2 className="font-mono text-xs text-muted">{"// SECTION C · SWAP"}</h2>
-        <SwapForm tokenIn={tokenIn} tokenOut={tokenOut} amount={amount} maxAmount={maxIn}
-          quoteOut={quote && quotedAmount === amountNum ? fromUnits(quote.amountOut) : null} price={quote?.priceAfter ?? null} error={error} busy={busy}
+
+      <div className="px-9 pt-4 pb-7">
+        <ControlBar
+          tokenIn={tokenIn} tokenOut={tokenOut} amount={amount} maxAmount={maxIn} landingAmounts={landingAmounts}
+          quoteOut={quote && quotedAmount === amountNum ? fromUnits(quote.amountOut) : null} price={quote?.priceAfter ?? null}
+          error={error} busy={busy}
           classic={classicQuote ? { amountOut: classicQuote.amountOut, price: classicQuote.priceAfter } : null}
           onTokenIn={pickIn} onTokenOut={pickOut} onAmount={setAmount} onFlip={flip} onCommit={commit} onReset={reset} />
-        <ReservesTable reserves={reserves} prices={prices} tvl={tvl} />
-        <TicksTable ticks={tickRows} />
-      </section>
+      </div>
     </div>
   );
 }

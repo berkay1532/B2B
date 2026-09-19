@@ -53,20 +53,36 @@ describe("PoolView", () => {
   it("keeps the classic dot on-chart at a large slider amount", async () => {
     render(<PoolView />);
     await waitFor(() => expect(screen.getByText("$30.00M")).toBeInTheDocument());
-    // maxAmount = reserves[i] * 2 = 20,000,000 — the top of the allowed slider range,
-    // where the classic preview reserve (cp[i] ≈ 30M) exceeds classic[i]*2 (20M).
+    // 20,000,000 in: the classic preview reserve (cp[i] ≈ 30M) runs well past the
+    // stretch of hyperbola the panel samples (2.2 × classic[i] = 22M).
     fireEvent.change(screen.getByLabelText("amount in"), { target: { value: "20000000" } });
     await waitFor(() => expect(screen.getByTestId("classic-dot")).toBeInTheDocument());
-    const svg = screen.getByRole("img", { name: "two token curve" });
+    const svg = screen.getByRole("img", { name: "classic curve" });
     const [, , w, h] = (svg.getAttribute("viewBox") ?? "").split(" ").map(Number);
-    for (const testId of ["classic-dot", "orbital-dot"]) {
-      const dot = screen.getByTestId(testId);
-      const cx = Number(dot.getAttribute("cx"));
-      const cy = Number(dot.getAttribute("cy"));
-      expect(cx).toBeGreaterThanOrEqual(0);
-      expect(cx).toBeLessThanOrEqual(w);
-      expect(cy).toBeGreaterThanOrEqual(0);
-      expect(cy).toBeLessThanOrEqual(h);
-    }
+    const dot = screen.getByTestId("classic-dot");
+    const cx = Number(dot.getAttribute("cx"));
+    const cy = Number(dot.getAttribute("cy"));
+    expect(cx).toBeGreaterThanOrEqual(0);
+    expect(cx).toBeLessThanOrEqual(w);
+    expect(cy).toBeGreaterThanOrEqual(0);
+    expect(cy).toBeLessThanOrEqual(h);
+    // the Orbital pool is no longer drawn in this panel
+    expect(screen.queryByTestId("orbital-dot")).not.toBeInTheDocument();
+  });
+
+  it("marks the slider where each tick lands on its plane", async () => {
+    render(<PoolView />);
+    await waitFor(() => expect(screen.getByText("$30.00M")).toBeInTheDocument());
+    const slider = screen.getByLabelText("amount slider") as HTMLInputElement;
+    const max = Number(slider.max);
+    // three of the four seed ticks land inside the slider range; the widest one lands
+    // exactly at the liquidity edge, which the right-hand caption already labels.
+    const markers = document.querySelectorAll('[title$="tick lands here"]');
+    expect(markers.length).toBe(3);
+    const lefts = [...markers].map((m) => parseFloat((m as HTMLElement).style.left));
+    expect(lefts).toEqual([...lefts].sort((a, b) => a - b));
+    expect(lefts[0]).toBeGreaterThan(0);
+    expect(lefts[lefts.length - 1]).toBeLessThanOrEqual(100);
+    expect(max).toBeGreaterThan(0);
   });
 });

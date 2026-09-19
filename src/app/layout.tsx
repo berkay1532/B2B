@@ -28,7 +28,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <Backdrop />
-        <main className="relative min-h-screen bg-bg text-fg">{children}</main>
+        <main className="relative min-h-screen text-fg">{children}</main>
       </body>
     </html>
   );

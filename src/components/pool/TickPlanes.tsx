@@ -1,40 +1,123 @@
 "use client";
-import { capitalEfficiency, kappaFromDepeg, projectState, ringRadiusNorm, schematicRadius, tokenCorners, type Tick } from "@/lib/orbital";
+import {
+  capitalEfficiency, kappaFromDepeg, projectState, ringRadiusNorm, schematicRadius, tokenCorners,
+  type Tick,
+} from "@/lib/orbital";
 import { TOKENS } from "@/config/tokens";
 
-export function TickPlanes({ ticks, prev }: { ticks: Tick[]; prev?: Tick[] }) {
-  const size = 420, c = size / 2, maxR = size * 0.42;
+const SIZE = 560;
+const C = SIZE / 2;
+const RING_SPAN = 220; // outermost ring radius — 54/108/164/220 for the four seed ticks
+
+interface Props {
+  ticks: Tick[];
+  prev?: Tick[];
+  /** true while an uncommitted preview is on screen; gates the reserve-dot trail */
+  previewing?: boolean;
+}
+
+/** Schematic of the tick planes: nested rings around PEG, the reserve point moving out
+ *  along the depeg direction. Ring geometry stays on the existing
+ *  `ringRadiusNorm`/`schematicRadius` mapping; only the drawing changed. */
+export function TickPlanes({ ticks, prev, previewing = false }: Props) {
   const sorted = [...ticks].sort((a, b) => a.depegBps - b.depegBps);
   const rings = sorted.map((t) => ringRadiusNorm(kappaFromDepeg(t.depegBps, 3), 3));
-  const spacing = maxR / (rings.length + 0.5);
-  const cur = projectState(ticks);
-  const rCur = schematicRadius(cur.rho, rings) * spacing;
-  const ang = Math.atan2(cur.v, cur.u);
-  const px = c + rCur * Math.cos(ang), py = c - rCur * Math.sin(ang);
+  const spacing = rings.length ? RING_SPAN / rings.length : RING_SPAN;
+  const axis = spacing * rings.length;
+
+  const at = (t: Tick[]) => {
+    const p = projectState(t);
+    const r = schematicRadius(p.rho, rings) * spacing;
+    const a = Math.atan2(p.v, p.u);
+    return { x: C + r * Math.cos(a), y: C - r * Math.sin(a) };
+  };
+  const cur = at(ticks);
+  const ghost = prev ? at(prev) : null;
+  const from = ghost ?? { x: C, y: C };
+
   const corners = tokenCorners();
+
   return (
-    <svg viewBox={`0 0 ${size} ${size}`} className="w-full" role="img" aria-label="tick planes">
-      {corners.map((k, i) => (
-        <g key={i}>
-          <line x1={c} y1={c} x2={c + maxR * k.u} y2={c - maxR * k.v} className="stroke-line" strokeDasharray="2 4" />
-          <text x={c + (maxR + 18) * k.u} y={c - (maxR + 18) * k.v} textAnchor="middle" dominantBaseline="middle" className="fill-muted font-mono text-[11px]">{TOKENS[i].code}</text>
-        </g>
-      ))}
-      {sorted.map((t, i) => (
-        <g key={t.id}>
-          <circle cx={c} cy={c} r={(i + 1) * spacing} fill="none" strokeDasharray="3 5"
-            className={t.state === "boundary" ? "stroke-boundary" : "stroke-muted"} />
-          <text x={c + 6} y={c - (i + 1) * spacing - 4} className="fill-muted font-mono text-[10px]">
-            {t.depegBps / 100}% · {capitalEfficiency(t.depegBps, 3).toFixed(1)}×
+    <svg
+      viewBox={`0 0 ${SIZE} ${SIZE}`}
+      className="h-[560px] w-full max-w-[600px] lg:h-auto lg:max-h-[560px] lg:min-h-0 lg:flex-1"
+      role="img"
+      aria-label="tick planes"
+    >
+      <defs>
+        <filter id="tickplanes-dot-glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3.5" result="b" />
+          <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+        <filter id="tickplanes-ring-glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="2.5" result="b" />
+          <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+      </defs>
+
+      {corners.map((k, idx) => (
+        <g key={TOKENS[idx].code}>
+          <line x1={C} y1={C} x2={C + axis * k.u} y2={C - axis * k.v} className="stroke-line" />
+          <text
+            x={C + (axis + 20) * k.u}
+            y={C - (axis + 20) * k.v}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            className="fill-muted-2 font-mono text-[12px]"
+          >
+            {TOKENS[idx].code}
           </text>
         </g>
       ))}
-      <circle cx={c} cy={c} r={3} className="fill-muted" />
-      <text x={c} y={c + 14} textAnchor="middle" className="fill-muted font-mono text-[10px]">PEG</text>
-      {prev && (() => { const p = projectState(prev); const r = schematicRadius(p.rho, rings) * spacing; const a = Math.atan2(p.v, p.u);
-        return <circle cx={c + r * Math.cos(a)} cy={c - r * Math.sin(a)} r={4} className="fill-muted opacity-50" />; })()}
-      <line x1={c} y1={c} x2={px} y2={py} className="stroke-accent" strokeWidth={1.5} />
-      <circle cx={px} cy={py} r={5} className="fill-accent" />
+
+      {/* `orbital-ring-pulse` only ever appears on the boundary branch, so the keyframes
+          run exactly once — at the render where a ring flips interior -> boundary and the
+          class first lands on the (otherwise stable) element. */}
+      {sorted.map((t, idx) => {
+        const r = (idx + 1) * spacing;
+        const boundary = t.state === "boundary";
+        return (
+          <g key={t.id}>
+            <circle
+              cx={C}
+              cy={C}
+              r={r}
+              fill="none"
+              strokeWidth={1.3}
+              {...(boundary
+                ? { className: "stroke-boundary orbital-ring-pulse", filter: "url(#tickplanes-ring-glow)" }
+                : { className: "stroke-muted-2 opacity-60", strokeDasharray: "2 7" })}
+            />
+            <text
+              x={C + 10}
+              y={C - r - 4}
+              className={`font-mono text-[11px] ${boundary ? "fill-boundary" : "fill-muted-2"}`}
+            >
+              {t.depegBps / 100}% · {capitalEfficiency(t.depegBps, 3).toFixed(1)}×
+            </text>
+          </g>
+        );
+      })}
+
+      <text x={C - 14} y={C + 24} className="fill-muted font-mono text-[11px]">PEG</text>
+
+      <line x1={C} y1={C} x2={cur.x} y2={cur.y} className="stroke-accent opacity-90" strokeWidth={1.8} />
+
+      {previewing &&
+        [0.25, 0.5, 0.75].map((f, idx) => (
+          <circle
+            key={f}
+            cx={from.x + (cur.x - from.x) * f}
+            cy={from.y + (cur.y - from.y) * f}
+            r={1.8 + idx * 0.4}
+            className="fill-accent"
+            fillOpacity={[0.25, 0.4, 0.6][idx]}
+          />
+        ))}
+
+      <circle cx={C} cy={C} r={5.5} className="fill-ghost" />
+      {ghost && <circle cx={ghost.x} cy={ghost.y} r={5.5} className="fill-ghost" />}
+      <circle cx={cur.x} cy={cur.y} r={7} className="fill-accent" filter="url(#tickplanes-dot-glow)" />
     </svg>
   );
 }
