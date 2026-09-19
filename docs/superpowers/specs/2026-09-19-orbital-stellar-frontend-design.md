@@ -1,7 +1,7 @@
 # Orbital on Stellar: Frontend + Math Library Design
 
 Date: 2026-09-19
-Status: approved in chat, visual direction pending user examples
+Status: approved in chat; visual direction decided 2026-09-20 (§5.4)
 
 ## 1. Goal
 
