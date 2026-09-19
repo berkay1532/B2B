@@ -57,6 +57,7 @@ export function useWallet() {
   useEffect(() => {
     try {
       const a = localStorage.getItem(STORAGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time hydration from localStorage on mount, not derived from props/state
       if (a) setAddress(a);
     } catch {
       // localStorage unavailable (private mode, SSR edge cases) — stay disconnected

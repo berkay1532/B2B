@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { MockPoolClient } from "./MockPoolClient";
 import { toUnits, fromUnits } from "./units";
-import { PoolError } from "./PoolClient";
+import type { Tick } from "@/lib/orbital";
 
 describe("MockPoolClient", () => {
   it("seeds a $30M pool with 4 interior ticks", async () => {
@@ -64,7 +64,7 @@ describe("MockPoolClient", () => {
     // `finite - Infinity` / `Infinity` division degrades to NaN (not the
     // Infinity a single non-zero-numerator division would give), which the
     // unguarded `> 0.01` check silently treats as "not mismatched".
-    const ticks = (c as any).ticks;
+    const ticks = (c as unknown as { ticks: Tick[] }).ticks;
     ticks[0].x[0] = ticks[0].xMinNorm * ticks[0].radius;
     await expect(c.deposit({ from: "G", amounts: [toUnits(100), toUnits(100), toUnits(100)], depegBps: ticks[0].depegBps }))
       .rejects.toMatchObject({ code: "ProportionMismatch" });

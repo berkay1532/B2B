@@ -37,6 +37,7 @@ export function PoolView() {
 
   // seed the classic comparison pool once from the committed real reserves
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time seed derived from the async-loaded pool state, not from props/state already in scope
     if (classic === null && ticks.length) setClassic(classicSeed(poolRealReserves(ticks)));
   }, [ticks, classic]);
 
@@ -61,6 +62,7 @@ export function PoolView() {
 
   // authoritative numeric quote from the client (debounced)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing a stale debounced quote when the amount changes, not derived state
     if (!(amountNum > 0)) { setQuote(null); setQuotedAmount(null); setError(null); return; }
     const h = setTimeout(async () => {
       try {
@@ -103,17 +105,17 @@ export function PoolView() {
   return (
     <div className="grid grid-cols-1 gap-6 p-6 lg:grid-cols-3">
       <section className="border border-line p-4">
-        <h2 className="mb-2 flex justify-between font-mono text-xs text-muted"><span>// SECTION A · TICK PLANES</span>{previewTicks && <span data-testid="preview-badge" className="text-accent">PREVIEW</span>}</h2>
+        <h2 className="mb-2 flex justify-between font-mono text-xs text-muted"><span>{"// SECTION A · TICK PLANES"}</span>{previewTicks && <span data-testid="preview-badge" className="text-accent">PREVIEW</span>}</h2>
         {shown.length > 0 && <TickPlanes ticks={shown} prev={ghost} />}
       </section>
       <section className="border border-line p-4">
-        <h2 className="mb-2 font-mono text-xs text-muted">// SECTION B · {tokenIn}/{tokenOut} PLANE</h2>
+        <h2 className="mb-2 font-mono text-xs text-muted">{"// SECTION B · "}{tokenIn}/{tokenOut}{" PLANE"}</h2>
         {shown.length > 0 && (
           <TwoTokenCurve ticks={shown} i={i} j={j} prev={ghost} classic={classic ?? reserves} classicPreview={classicPreview} />
         )}
       </section>
       <section className="flex flex-col gap-6 border border-line p-4">
-        <h2 className="font-mono text-xs text-muted">// SECTION C · SWAP</h2>
+        <h2 className="font-mono text-xs text-muted">{"// SECTION C · SWAP"}</h2>
         <SwapForm tokenIn={tokenIn} tokenOut={tokenOut} amount={amount} maxAmount={maxIn}
           quoteOut={quote && quotedAmount === amountNum ? fromUnits(quote.amountOut) : null} price={quote?.priceAfter ?? null} error={error} busy={busy}
           classic={classicQuote ? { amountOut: classicQuote.amountOut, price: classicQuote.priceAfter } : null}

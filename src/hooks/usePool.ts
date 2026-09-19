@@ -7,6 +7,7 @@ export function usePool() {
   const [state, setState] = useState<PoolState | null>(null);
   const refresh = useCallback(async () => { setState(await client.getState()); }, [client]);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial load from the client, not derived from props/state
     void refresh();
     return client.subscribe(setState);
   }, [client, refresh]);
