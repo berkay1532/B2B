@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { usePool } from "@/hooks/usePool";
+import { useWallet } from "@/hooks/useWallet";
 import { TOKENS, tokenIndex } from "@/config/tokens";
 import { fromUnits, toUnits, PoolError, type Quote } from "@/lib/pool";
 import { ticksFromState } from "@/lib/pool/reconstruct";
@@ -16,6 +17,7 @@ type WithTicks = { getTicks?: () => Tick[] };
 
 export function PoolView() {
   const { state, client } = usePool();
+  const { address } = useWallet();
   const [tokenIn, setTokenIn] = useState(TOKENS[0].code);
   const [tokenOut, setTokenOut] = useState(TOKENS[1].code);
   const [amount, setAmount] = useState("");
@@ -75,7 +77,7 @@ export function PoolView() {
     setBusy(true);
     try {
       setPrevTicks(ticks);
-      await client.swap({ from: "", tokenIn, tokenOut, amountIn: toUnits(amountNum), minOut: (quote.amountOut * 995n) / 1000n });
+      await client.swap({ from: address ?? "", tokenIn, tokenOut, amountIn: toUnits(amountNum), minOut: (quote.amountOut * 995n) / 1000n });
       setClassic((c) => (c ? classicApply(c, i, j, amountNum) : c));
       setAmount("");
     } catch (e) { setError(e instanceof PoolError ? e.message : String(e)); }
