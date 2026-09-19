@@ -190,9 +190,23 @@ architecture (not its visual style):
   with effective price, Commit and Reset buttons. Below: reserves table
   (reserve, price) and TVL; ticks table (depeg, cap eff, state).
 
-Quotes recompute on every input change (debounced), state updates after
-commit. In mock mode Commit is instant; in soroban mode it opens the
-wallet signer and shows the tx hash.
+**Live preview.** The amount slider (and the input) drive a preview of the
+post-swap state before Commit: the dots in the tick-planes and two-token
+panels move, the reserves/prices table and tick states update, and a grey
+ghost dot marks the committed state. Commit makes the preview the new
+committed state (the previous committed state becomes the ghost); Reset
+returns to the seed. The preview is computed locally with the pure math
+library; the numeric quote in the swap panel comes from the `PoolClient`.
+
+**Classic comparison.** The two-token panel also draws a plain `x*y=k`
+pool seeded with the same real reserves, on real-reserve axes, with its own
+dot driven by the same slider and updated on Commit. The swap panel shows
+the classic output next to the Orbital output. This makes the capital
+efficiency claim visible: the Orbital curve stays almost straight while
+the hyperbola bends.
+
+Quotes recompute on every input change (debounced). In mock mode Commit is
+instant; in soroban mode it opens the wallet signer and shows the tx hash.
 
 ### 5.2 Attack demo page (`/attack`)
 

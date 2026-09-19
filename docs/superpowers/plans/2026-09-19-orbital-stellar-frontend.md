@@ -40,6 +40,7 @@
 | `src/lib/pool/SorobanPoolClient.ts` | stub |
 | `src/lib/pool/index.ts` | `getPoolClient()` singleton chosen by env |
 | `src/config/tokens.ts` | token list |
+| `src/lib/classic/constantProduct.ts` | `cpQuote`, `classicSeed`, `classicApply` (x·y=k comparison) |
 | `src/lib/attack/orderbook.ts` | `THIN_BOOK`, `sweep` |
 | `src/hooks/usePool.ts` | React hook: state + quote + swap |
 | `src/components/pool/*` | `TickPlanes`, `TwoTokenCurve`, `SwapForm`, `ReservesTable`, `TicksTable` |
@@ -1283,8 +1284,10 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Test: `src/components/pool/PoolView.test.tsx`
 
 **Interfaces:**
-- Consumes: `usePool`, `lib/orbital` (`projectState`, `tokenCorners`, `schematicRadius`, `ringRadiusNorm`, `kappaFromDepeg`, `poolPrice`), `lib/pool` (`formatUsd`, `fromUnits`, `toUnits`).
+- Consumes: `usePool`, `lib/orbital` (`projectState`, `tokenCorners`, `schematicRadius`, `ringRadiusNorm`, `kappaFromDepeg`, `poolPrice`, `pricingTicks`, `quote`, `capitalEfficiency`), `lib/pool` (`formatUsd`, `fromUnits`, `toUnits`).
 - Produces: `PoolView` client component that owns swap form state (`tokenIn`, `tokenOut`, `amount`) and passes derived props down. Components are presentational.
+
+**Live preview requirement (from the user's reference):** dragging the amount slider or typing an amount must move the dots in Section A and Section B, update the reserves/prices table and the tick states immediately, before COMMIT. The committed state is drawn as a grey ghost dot while a preview is active. COMMIT makes the preview the new committed state (and the previous committed state becomes the ghost); RESET returns to the seed. `PoolView` therefore computes `previewTicks = quote(ticks, i, j, amount).ticks` locally with the pure math library whenever the amount is valid, and every visual and table renders `previewTicks ?? ticks`. The numeric quote in the swap panel still comes from `client.quote` (authoritative; identical in mock mode).
 
 Because `PoolState` carries only real reserves and tick summaries (bigint), the SVGs need the math-level ticks. To keep the adapter boundary intact, `MockPoolClient` also exposes `getTicks(): Tick[]` (mock only) and `PoolView` uses it when available; when unavailable (soroban) the tick-planes dot is placed from `PoolState.reserves` via a reconstructed consolidated tick. Implement `ticksFromState(state: PoolState): Tick[]` in `src/lib/pool/reconstruct.ts` for that fallback: one tick per `TickInfo` with `radius = fromUnits(radius)`, `x` unknown, so set `x` at the equal point scaled by `reserves / seedReserves`. This is display-only.
 
@@ -1297,14 +1300,22 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { PoolView } from "./PoolView";
 
 describe("PoolView", () => {
-  it("renders reserves and quotes a swap", async () => {
+  it("previews live, then commits", async () => {
     render(<PoolView />);
     await waitFor(() => expect(screen.getByText("$30.00M")).toBeInTheDocument());
     const input = screen.getByLabelText("amount in");
     fireEvent.change(input, { target: { value: "6000000" } });
-    await waitFor(() => expect(screen.getByTestId("quote-out").textContent).toMatch(/\$/));
-    fireEvent.click(screen.getByText("COMMIT SWAP"));
+    // preview: ticks flip and the reserves table moves before any commit
     await waitFor(() => expect(screen.getAllByText("BOUNDARY").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByTestId("quote-out").textContent).toMatch(/\$/));
+    expect(screen.getByTestId("preview-badge")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("COMMIT SWAP"));
+    // committed: preview badge gone, boundary states persist, amount cleared
+    await waitFor(() => expect(screen.queryByTestId("preview-badge")).not.toBeInTheDocument());
+    expect(screen.getAllByText("BOUNDARY").length).toBeGreaterThan(0);
+    expect((screen.getByLabelText("amount in") as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByText("RESET"));
+    await waitFor(() => expect(screen.queryAllByText("BOUNDARY").length).toBe(0));
   });
 });
 ```
@@ -1492,9 +1503,9 @@ export function ReservesTable({ reserves, prices, tvl }: { reserves: number[]; p
 
 `src/components/pool/TicksTable.tsx`:
 ```tsx
-import type { TickInfo } from "@/lib/pool";
+export interface TickRow { depegBps: number; capEff: number; state: "interior" | "boundary" }
 
-export function TicksTable({ ticks }: { ticks: TickInfo[] }) {
+export function TicksTable({ ticks }: { ticks: TickRow[] }) {
   return (
     <table className="w-full font-mono text-sm">
       <thead><tr className="text-muted"><th className="text-left">DEPEG</th><th className="text-left">CAP. EFF.</th><th className="text-right">STATE</th></tr></thead>
@@ -1517,7 +1528,7 @@ import { usePool } from "@/hooks/usePool";
 import { TOKENS, tokenIndex } from "@/config/tokens";
 import { fromUnits, toUnits, PoolError, type Quote } from "@/lib/pool";
 import { ticksFromState } from "@/lib/pool/reconstruct";
-import { poolPrice, pricingTicks, type Tick } from "@/lib/orbital";
+import { capitalEfficiency, poolPrice, poolRealReserves, pricingTicks, quote as mathQuote, type Tick } from "@/lib/orbital";
 import { TickPlanes } from "./TickPlanes";
 import { TwoTokenCurve } from "./TwoTokenCurve";
 import { SwapForm } from "./SwapForm";
@@ -1536,35 +1547,48 @@ export function PoolView() {
   const [busy, setBusy] = useState(false);
   const [prevTicks, setPrevTicks] = useState<Tick[] | undefined>();
 
+  // committed math-level ticks
   const ticks = useMemo<Tick[]>(() => {
     if (!state) return [];
     const g = (client as unknown as WithTicks).getTicks;
     return g ? g.call(client) : ticksFromState(state);
   }, [state, client]);
 
+  const i = tokenIndex(tokenIn), j = tokenIndex(tokenOut);
+  const amountNum = Number(amount);
+
+  // live preview from the pure math library (no client round trip)
+  const previewTicks = useMemo<Tick[] | null>(() => {
+    if (!(amountNum > 0) || ticks.length === 0) return null;
+    try { return mathQuote(ticks, i, j, amountNum).ticks; } catch { return null; }
+  }, [ticks, i, j, amountNum]);
+
+  // authoritative numeric quote from the client (debounced)
   useEffect(() => {
-    const a = Number(amount);
-    if (!(a > 0)) { setQuote(null); setError(null); return; }
+    if (!(amountNum > 0)) { setQuote(null); setError(null); return; }
     const h = setTimeout(async () => {
-      try { setQuote(await client.quote(tokenIn, tokenOut, toUnits(a))); setError(null); }
+      try { setQuote(await client.quote(tokenIn, tokenOut, toUnits(amountNum))); setError(null); }
       catch (e) { setQuote(null); setError(e instanceof PoolError ? e.message : String(e)); }
     }, 80);
     return () => clearTimeout(h);
-  }, [amount, tokenIn, tokenOut, client]);
+  }, [amountNum, tokenIn, tokenOut, client]);
 
   if (!state) return <div className="p-6 font-mono text-muted">loading…</div>;
 
-  const i = tokenIndex(tokenIn), j = tokenIndex(tokenOut);
+  const shown = previewTicks ?? ticks;                 // what every visual and table renders
+  const ghost = previewTicks ? ticks : prevTicks;      // grey dot: committed state during preview, else last committed
   const numeraire = [0, 1, 2].find((k) => k !== i && k !== j) ?? 0;
-  const prices = ticks.length ? [0, 1, 2].map((k) => poolPrice(pricingTicks(ticks), k, numeraire)) : [1, 1, 1];
-  const reserves = state.reserves.map(fromUnits);
+  const prices = shown.length ? [0, 1, 2].map((k) => poolPrice(pricingTicks(shown), k, numeraire)) : [1, 1, 1];
+  const reserves = shown.length ? poolRealReserves(shown) : state.reserves.map(fromUnits);
+  const tvl = reserves.reduce((a, b) => a + b, 0);
+  const tickRows = shown.map((t) => ({ depegBps: t.depegBps, capEff: capitalEfficiency(t.depegBps, 3), state: t.state }));
 
   const commit = async () => {
     if (!quote) return;
     setBusy(true);
     try {
       setPrevTicks(ticks);
-      await client.swap({ from: "", tokenIn, tokenOut, amountIn: toUnits(Number(amount)), minOut: (quote.amountOut * 995n) / 1000n });
+      await client.swap({ from: "", tokenIn, tokenOut, amountIn: toUnits(amountNum), minOut: (quote.amountOut * 995n) / 1000n });
       setAmount("");
     } catch (e) { setError(e instanceof PoolError ? e.message : String(e)); }
     finally { setBusy(false); }
@@ -1576,15 +1600,21 @@ export function PoolView() {
 
   return (
     <div className="grid grid-cols-1 gap-6 p-6 lg:grid-cols-3">
-      <section className="border border-line p-4"><h2 className="mb-2 font-mono text-xs text-muted">// SECTION A · TICK PLANES</h2><TickPlanes ticks={ticks} prev={prevTicks} /></section>
-      <section className="border border-line p-4"><h2 className="mb-2 font-mono text-xs text-muted">// SECTION B · {tokenIn}/{tokenOut} PLANE</h2><TwoTokenCurve ticks={ticks} i={i} j={j} prev={prevTicks} /></section>
+      <section className="border border-line p-4">
+        <h2 className="mb-2 flex justify-between font-mono text-xs text-muted"><span>// SECTION A · TICK PLANES</span>{previewTicks && <span data-testid="preview-badge" className="text-accent">PREVIEW</span>}</h2>
+        <TickPlanes ticks={shown} prev={ghost} />
+      </section>
+      <section className="border border-line p-4">
+        <h2 className="mb-2 font-mono text-xs text-muted">// SECTION B · {tokenIn}/{tokenOut} PLANE</h2>
+        <TwoTokenCurve ticks={shown} i={i} j={j} prev={ghost} />
+      </section>
       <section className="flex flex-col gap-6 border border-line p-4">
         <h2 className="font-mono text-xs text-muted">// SECTION C · SWAP</h2>
-        <SwapForm tokenIn={tokenIn} tokenOut={tokenOut} amount={amount} maxAmount={reserves[i] * 2}
+        <SwapForm tokenIn={tokenIn} tokenOut={tokenOut} amount={amount} maxAmount={state.reserves.map(fromUnits)[i] * 2}
           quoteOut={quote ? fromUnits(quote.amountOut) : null} price={quote?.priceAfter ?? null} error={error} busy={busy}
           onTokenIn={pickIn} onTokenOut={pickOut} onAmount={setAmount} onFlip={flip} onCommit={commit} onReset={reset} />
-        <ReservesTable reserves={reserves} prices={prices} tvl={fromUnits(state.tvl)} />
-        <TicksTable ticks={state.ticks} />
+        <ReservesTable reserves={reserves} prices={prices} tvl={tvl} />
+        <TicksTable ticks={tickRows} />
       </section>
     </div>
   );
@@ -1605,20 +1635,192 @@ export default function Page() {
 
 Run: `npx vitest run` then `npm run build`.
 Expected: all pass, build succeeds.
-Run `npm run dev`, open `http://localhost:3000`, type 6000000 into the amount, confirm the quote shows about $5.96M (the 10 bps tick carries 1098x virtual depth, so a $6M swap barely moves price; that is correct), commit, and confirm the 10 and 100 bps ticks show BOUNDARY and the dot leaves PEG. Note any visual defects in the commit message body; do not fix styling now.
+Run `npm run dev`, open `http://localhost:3000`, drag the slider: the dots in Sections A and B must move while dragging and the tick rows must flip to BOUNDARY before any commit. Type 6000000, confirm the quote shows about $5.96M (the 10 bps tick carries 1098x virtual depth, so a $6M swap barely moves price; that is correct), commit, and confirm the PREVIEW badge disappears, the states persist, and a grey ghost dot marks where the pool was. Note any visual defects in the commit message body; do not fix styling now.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src
-git commit -m "feat(ui): pool page with tick planes, curve and swap panel
+git commit -m "feat(ui): pool page with live preview, tick planes, curve and swap panel
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 9: Attack demo page
+### Task 9: Classic AMM comparison driven by the same slider
+
+**Files:**
+- Create: `src/lib/classic/constantProduct.ts`
+- Modify: `src/components/pool/TwoTokenCurve.tsx`, `src/components/pool/SwapForm.tsx`, `src/components/pool/PoolView.tsx`
+- Test: `src/lib/classic/constantProduct.test.ts`, extend `src/components/pool/PoolView.test.tsx`
+
+**Interfaces:**
+- Consumes: `quote`, `maxFillable`, `poolRealReserves` from `@/lib/orbital`; `formatUsd`.
+- Produces:
+  - `cpQuote(reserveIn: number, reserveOut: number, amountIn: number): { amountOut: number; priceAfter: number; reserveIn: number; reserveOut: number }` constant product, no fee; `priceAfter` is the marginal price of the out token in the in token = `reserveIn' / reserveOut'`
+  - `ClassicPool` = `{ reserves: number[] }` helpers: `classicSeed(realReserves: number[]): number[]` (copy), `classicApply(reserves, i, j, amountIn): number[]`
+  - `TwoTokenCurve` props gain `classic: number[]` (classic reserves, committed) and `classicPreview?: number[]`; it draws both curves on **real-reserve axes** and both dots (plus ghosts)
+  - `SwapForm` props gain `classic: { amountOut: number; price: number } | null` and render a comparison row
+
+**Why real-reserve axes:** Orbital's effective reserves are billions (virtual depth) while the classic pool holds the real $10M. The only shared axis is real reserves. On those axes the Orbital curve is almost a straight line of slope -1 until a tick edge, the classic hyperbola bends immediately. That picture is the capital-efficiency claim, drawn.
+
+- [ ] **Step 1: Write the failing tests**
+
+`src/lib/classic/constantProduct.test.ts`:
+```ts
+import { describe, it, expect } from "vitest";
+import { cpQuote, classicApply, classicSeed } from "./constantProduct";
+
+describe("constant product", () => {
+  it("conserves k and returns less than input at equal reserves", () => {
+    const q = cpQuote(10_000_000, 10_000_000, 1_000_000);
+    expect(q.reserveIn * q.reserveOut).toBeCloseTo(1e14, -2);
+    expect(q.amountOut).toBeLessThan(1_000_000);
+    expect(q.amountOut).toBeGreaterThan(900_000);
+    expect(q.priceAfter).toBeGreaterThan(1);
+  });
+  it("classicApply updates only the two reserves involved", () => {
+    const r = classicSeed([10, 10, 10]);
+    const n = classicApply(r, 0, 1, 5);
+    expect(n[0]).toBe(15);
+    expect(n[1]).toBeCloseTo(100 / 15, 9);
+    expect(n[2]).toBe(10);
+    expect(r[0]).toBe(10); // input untouched
+  });
+});
+```
+
+Append to `src/components/pool/PoolView.test.tsx`:
+```tsx
+  it("shows the classic comparison and moves it with the slider", async () => {
+    render(<PoolView />);
+    await waitFor(() => expect(screen.getByText("$30.00M")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("amount in"), { target: { value: "6000000" } });
+    await waitFor(() => expect(screen.getByTestId("classic-out").textContent).toMatch(/\$/));
+    // classic gives less than orbital for the same input
+    const classic = Number(screen.getByTestId("classic-out").getAttribute("data-value"));
+    const orbital = Number(screen.getByTestId("quote-out").getAttribute("data-value"));
+    expect(classic).toBeLessThan(orbital);
+  });
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `npx vitest run src/lib/classic src/components/pool`
+Expected: FAIL, module not found / testid missing.
+
+- [ ] **Step 3: Implement**
+
+`src/lib/classic/constantProduct.ts`:
+```ts
+/** Plain x*y=k pool, no fee. Prices are "out token in units of in token". */
+export function cpQuote(reserveIn: number, reserveOut: number, amountIn: number) {
+  if (!(amountIn > 0)) return { amountOut: 0, priceAfter: reserveIn / reserveOut, reserveIn, reserveOut };
+  const k = reserveIn * reserveOut;
+  const newIn = reserveIn + amountIn;
+  const newOut = k / newIn;
+  return { amountOut: reserveOut - newOut, priceAfter: newIn / newOut, reserveIn: newIn, reserveOut: newOut };
+}
+
+export const classicSeed = (realReserves: number[]): number[] => [...realReserves];
+
+export function classicApply(reserves: number[], i: number, j: number, amountIn: number): number[] {
+  const q = cpQuote(reserves[i], reserves[j], amountIn);
+  const next = [...reserves];
+  next[i] = q.reserveIn;
+  next[j] = q.reserveOut;
+  return next;
+}
+```
+
+Replace `src/components/pool/TwoTokenCurve.tsx` with:
+```tsx
+"use client";
+import { maxFillable, poolRealReserves, quote, type Tick } from "@/lib/orbital";
+import { TOKENS } from "@/config/tokens";
+
+interface Props { ticks: Tick[]; i: number; j: number; prev?: Tick[]; classic: number[]; classicPreview?: number[] }
+
+/** Both curves on real-reserve axes: Orbital sampled through quote(), classic as y = k/x. */
+export function TwoTokenCurve({ ticks, i, j, prev, classic, classicPreview }: Props) {
+  const w = 460, h = 380, pad = 40, N = 40;
+  const real = poolRealReserves(ticks);
+  const cur: [number, number] = [real[i], real[j]];
+
+  // Orbital: sample forward (sell i) and backward (sell j) up to what the ticks can absorb, capped for readability
+  const fwdMax = Math.min(maxFillable(ticks, i, j), real[i] * 1.5);
+  const bwdMax = Math.min(maxFillable(ticks, j, i), real[j] * 1.5);
+  const orbital: [number, number][] = [];
+  for (let k = N; k >= 1; k--) { try { const r = poolRealReserves(quote(ticks, j, i, (bwdMax * k) / N).ticks); orbital.push([r[i], r[j]]); } catch { /* skip */ } }
+  orbital.push(cur);
+  for (let k = 1; k <= N; k++) { try { const r = poolRealReserves(quote(ticks, i, j, (fwdMax * k) / N).ticks); orbital.push([r[i], r[j]]); } catch { /* skip */ } }
+
+  // Classic: hyperbola through the committed classic reserves
+  const kc = classic[i] * classic[j];
+  const xs = orbital.map((p) => p[0]);
+  const xMin = Math.min(...xs, classic[i] * 0.5), xMax = Math.max(...xs, classic[i] * 2);
+  const hyper: [number, number][] = Array.from({ length: 2 * N + 1 }, (_, k) => { const x = xMin + ((xMax - xMin) * k) / (2 * N); return [x, kc / x]; });
+
+  const ys = [...orbital.map((p) => p[1]), ...hyper.map((p) => p[1])];
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const sx = (v: number) => pad + ((v - xMin) / (xMax - xMin || 1)) * (w - 2 * pad);
+  const sy = (v: number) => h - pad - ((v - yMin) / (yMax - yMin || 1)) * (h - 2 * pad);
+  const path = (pts: [number, number][]) => pts.map(([a, b], k) => `${k ? "L" : "M"}${sx(a)},${sy(b)}`).join(" ");
+  const prevReal = prev ? poolRealReserves(prev) : null;
+  const cp = classicPreview ?? classic;
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" role="img" aria-label="two token curve">
+      <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} className="stroke-line" />
+      <line x1={pad} y1={pad} x2={pad} y2={h - pad} className="stroke-line" />
+      <path d={path(hyper)} fill="none" className="stroke-muted" strokeWidth={1} strokeDasharray="4 4" />
+      <path d={path(orbital)} fill="none" className="stroke-fg" strokeWidth={1.5} />
+      <text x={w - pad} y={h - 12} textAnchor="end" className="fill-muted font-mono text-[10px]">{TOKENS[i].code} real reserve →</text>
+      <text x={pad} y={pad - 10} className="fill-muted font-mono text-[10px]">↑ {TOKENS[j].code}</text>
+      <text x={w - pad} y={pad} textAnchor="end" className="fill-muted font-mono text-[10px]">dashed = x·y=k · solid = orbital</text>
+      {prevReal && <circle cx={sx(prevReal[i])} cy={sy(prevReal[j])} r={4} className="fill-muted opacity-50" />}
+      {classicPreview && <circle cx={sx(classic[i])} cy={sy(classic[j])} r={4} className="fill-muted opacity-30" />}
+      <circle cx={sx(cp[i])} cy={sy(cp[j])} r={5} fill="none" className="stroke-muted" strokeWidth={1.5} />
+      <circle cx={sx(cur[0])} cy={sy(cur[1])} r={5} className="fill-accent" />
+    </svg>
+  );
+}
+```
+
+`src/components/pool/SwapForm.tsx`: add prop `classic: { amountOut: number; price: number } | null` to `SwapFormProps` and render, directly under the quote box:
+```tsx
+      <div className="flex items-center justify-between rounded border border-dashed border-line px-3 py-2 text-xs text-muted">
+        <span>CLASSIC x·y=k</span>
+        <span data-testid="classic-out" data-value={p.classic?.amountOut ?? ""}>{p.classic ? `${formatUsd(p.classic.amountOut)} · 1 ${p.tokenIn} ≈ ${(1 / p.classic.price).toFixed(5)} ${p.tokenOut}` : "—"}</span>
+      </div>
+```
+Also add `data-value={p.quoteOut ?? ""}` to the existing `quote-out` element.
+
+`src/components/pool/PoolView.tsx` changes:
+- import `{ cpQuote, classicApply, classicSeed } from "@/lib/classic/constantProduct"`
+- state: `const [classic, setClassic] = useState<number[] | null>(null);` seeded once from the first committed `ticks` (`useEffect(() => { if (classic === null && ticks.length) setClassic(classicSeed(poolRealReserves(ticks))); }, [ticks, classic])`)
+- derived: `const classicQuote = classic && amountNum > 0 ? cpQuote(classic[i], classic[j], amountNum) : null;` and `const classicPreview = classicQuote ? classicApply(classic!, i, j, amountNum) : undefined;`
+- pass `classic={classic ?? reserves}` and `classicPreview={classicPreview}` to `TwoTokenCurve`, and `classic={classicQuote ? { amountOut: classicQuote.amountOut, price: classicQuote.priceAfter } : null}` to `SwapForm`
+- in `commit`, after the successful swap: `setClassic((c) => (c ? classicApply(c, i, j, amountNum) : c));`
+- in `reset`: `setClassic(null)` so it re-seeds from the reset pool
+
+- [ ] **Step 4: Run tests and build**
+
+Run: `npx vitest run` then `npm run build`. In the browser, the dashed hyperbola must bend visibly while the solid Orbital line stays nearly straight, the hollow classic dot slides along the hyperbola with the slider, and the comparison row shows a smaller classic output.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src
+git commit -m "feat(ui): classic x*y=k comparison on the same slider
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 10: Attack demo page
 
 **Files:**
 - Create: `src/lib/attack/orderbook.ts`, `src/components/attack/OrderbookPanel.tsx`, `src/components/attack/OrbitalPanel.tsx`, `src/components/attack/AttackView.tsx`, `src/app/attack/page.tsx`
@@ -1834,7 +2036,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 10: Wallet connect
+### Task 11: Wallet connect
 
 **Files:**
 - Create: `src/components/wallet/ConnectButton.tsx`, `src/hooks/useWallet.ts`
@@ -1927,14 +2129,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 11: README and contract handoff doc
+### Task 12: README and contract handoff doc
 
 **Files:**
 - Create: `README.md`, `docs/contract-interface.md`
 
 - [ ] **Step 1: Write README**
 
-`README.md` covers: what this is (one paragraph, credit Paradigm's Orbital paper and note the EVM reference implementation exists at github.com/Oxkai/orbital-hook while this is an independent Stellar implementation), how to run (`npm i`, `npm run dev`, `npm test`), env vars from `.env.example`, the two pages, the v1 simplification (frozen boundary ticks), and the layer diagram from the spec.
+`README.md` covers: what this is (one paragraph, credit Paradigm's Orbital paper and note the EVM reference implementation exists at github.com/Oxkai/orbital-hook while this is an independent Stellar implementation), how to run (`npm i`, `npm run dev`, `npm test`), env vars from `.env.example`, the two pages (pool page with live slider preview and the classic x·y=k overlay; attack page), the v1 simplification (frozen boundary ticks), and the layer diagram from the spec.
 
 - [ ] **Step 2: Write the contract handoff**
 
@@ -1953,6 +2155,6 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ## Self-review notes
 
-- Spec coverage: 4.1 math (Tasks 2-5), 4.2 adapter (Task 6), 4.3 handoff (Task 11), 4.4 tokens (Task 6), 5.1 pool page (Task 8), 5.2 attack page (Task 9), 5.3 wallet (Task 10), 5.4 visual direction deliberately deferred (theme tokens only, Task 7), 6 error handling (OrbitalError/PoolError mapping in Tasks 4 and 6, UI messages in Task 8), 7 tests (each task), 8 build order followed.
+- Spec coverage: 4.1 math (Tasks 2-5), 4.2 adapter (Task 6), 4.3 handoff (Task 12), 4.4 tokens (Task 6), 5.1 pool page with live preview (Task 8) and classic comparison (Task 9, added from the user's reference screenshot), 5.2 attack page (Task 10), 5.3 wallet (Task 11), 5.4 visual direction deliberately deferred (theme tokens only, Task 7), 6 error handling (OrbitalError/PoolError mapping in Tasks 4 and 6, UI messages in Task 8), 7 tests (each task), 8 build order followed.
 - Known approximation: `ticksFromState` fallback for a non-mock client is display-only and will be replaced when the Soroban client can return per-tick reserves.
 - The `TickPlanes` label expression in Task 8 Step 3 is explicitly replaced by `capitalEfficiency(...)`; implementers must apply that replacement.
