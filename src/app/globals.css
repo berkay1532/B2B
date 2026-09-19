@@ -1,12 +1,15 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #0b0b0d;
-  --fg: #f2f2f2;
-  --muted: #8a8a93;
-  --line: #24242a;
-  --accent: #8b5cf6;
-  --boundary: #f59e0b;
+  --bg: #05070d;
+  --bg-2: #0d1630;
+  --fg: #e6ebf7;
+  --muted: #6e7a94;
+  --muted-2: #8a96b3;
+  --line: rgba(120, 150, 255, 0.14);
+  --accent: #37f0d0;
+  --boundary: #ffb454;
+  --ghost: #3b4661;
   --token-0: #60a5fa;
   --token-1: #34d399;
   --token-2: #f472b6;
@@ -14,16 +17,30 @@
 
 @theme inline {
   --color-bg: var(--bg);
+  --color-bg-2: var(--bg-2);
   --color-fg: var(--fg);
   --color-muted: var(--muted);
+  --color-muted-2: var(--muted-2);
   --color-line: var(--line);
   --color-accent: var(--accent);
   --color-boundary: var(--boundary);
+  --color-ghost: var(--ghost);
   --color-token-0: var(--token-0);
   --color-token-1: var(--token-1);
   --color-token-2: var(--token-2);
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); }
+
+@keyframes orbital-pulse {
+  0% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.5; }
+  100% { stroke-opacity: 1; }
+}
+
+@keyframes orbital-fade {
+  0% { opacity: 0.6; }
+  100% { opacity: 0; }
+}
