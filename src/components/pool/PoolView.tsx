@@ -111,7 +111,7 @@ export function PoolView() {
       <section className="border border-line p-4">
         <h2 className="mb-2 font-mono text-xs text-muted">{"// SECTION B · "}{tokenIn}/{tokenOut}{" PLANE"}</h2>
         {shown.length > 0 && (
-          <TwoTokenCurve ticks={shown} i={i} j={j} prev={ghost} classic={classic ?? reserves} classicPreview={classicPreview} />
+          <TwoTokenCurve committed={ticks} current={shown} i={i} j={j} prev={ghost} classic={classic ?? reserves} classicCurrent={classicPreview ?? classic ?? reserves} />
         )}
       </section>
       <section className="flex flex-col gap-6 border border-line p-4">
