@@ -45,6 +45,10 @@ Wallet connection uses `@creit.tech/stellar-wallets-kit` 2.x against testnet
 (Freighter and others); it works in mock mode too (the address shows, swaps
 just don't sign).
 
+The visual direction — dark "Observatory" theme, tick-plane rings, glow
+accents — follows `docs/design/observatory-stage-mockup.html`, the approved
+design mockup.
+
 ## Pages
 
 - **`/` — pool.** Three columns: tick planes (SVG rings labeled
