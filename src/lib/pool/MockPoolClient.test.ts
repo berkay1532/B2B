@@ -57,10 +57,15 @@ describe("MockPoolClient", () => {
   });
   it("deposit rejects into a tick with a drained (zero) real reserve", async () => {
     const c = new MockPoolClient();
-    // Force tick 0's real reserve for token 1 to exactly 0 (as if fully drained
+    // Force tick 0's real reserve for token 0 to exactly 0 (as if fully drained
     // toward its boundary), bypassing the swap engine to isolate this guard.
+    // Draining index 0 specifically reproduces the reported bug: it makes
+    // `ratio = amounts[0] / real[0]` itself Infinity, so a later
+    // `finite - Infinity` / `Infinity` division degrades to NaN (not the
+    // Infinity a single non-zero-numerator division would give), which the
+    // unguarded `> 0.01` check silently treats as "not mismatched".
     const ticks = (c as any).ticks;
-    ticks[0].x[1] = ticks[0].xMinNorm * ticks[0].radius;
+    ticks[0].x[0] = ticks[0].xMinNorm * ticks[0].radius;
     await expect(c.deposit({ from: "G", amounts: [toUnits(100), toUnits(100), toUnits(100)], depegBps: ticks[0].depegBps }))
       .rejects.toMatchObject({ code: "ProportionMismatch" });
   });
