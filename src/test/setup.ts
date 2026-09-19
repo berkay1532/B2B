@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
+import type { ReactNode } from "react";
 
 // `@sembol/passkey-react` pulls in `smart-account-kit`, which runs Stellar-SDK hashing at
 // module-import time; that trips over jsdom's crypto shims (unrelated to our wallet logic)
@@ -15,9 +16,23 @@ vi.mock("@sembol/passkey-react", () => ({
   },
   toSembolError: (err: unknown) => {
     if (err && typeof err === "object" && "code" in err) return err;
-    if (err instanceof Error) return { code: "unknown", message: err.message };
-    return { code: "unknown", message: String(err) };
+    if (err instanceof Error) return { code: "unknown", message: err.message, userMessage: "" };
+    return { code: "unknown", message: String(err), userMessage: "" };
   },
+  // WalletProvider.tsx spreads SEMBOL_TESTNET_ARTIFACTS and renders PasskeyWalletProvider at
+  // module scope, so any test importing it (e.g. WalletProvider.test.tsx, or layout-level
+  // imports) needs these to exist even though nothing here exercises real wallet behavior.
+  PasskeyWalletProvider: ({ children }: { children: ReactNode }) => children,
+  SEMBOL_TESTNET_ARTIFACTS: {
+    rpcUrl: "https://soroban-testnet.stellar.org",
+    networkPassphrase: "Test SDF Network ; September 2015",
+    accountWasmHash: "stub-wasm-hash",
+    webauthnVerifierAddress: "stub-webauthn-verifier",
+    ed25519VerifierAddress: "stub-ed25519-verifier",
+    spendingLimitPolicyAddress: "stub-spending-limit-policy",
+    nativeTokenContract: "stub-native-token-contract",
+  },
+  sembolThemeToCss: () => "",
 }));
 
 if (typeof window !== "undefined") {

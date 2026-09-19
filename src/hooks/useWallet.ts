@@ -22,6 +22,16 @@ function useOptionalPasskeyWallet(): PasskeyWalletContextValue | null {
 }
 
 /**
+ * `userMessage` is the curated, end-user-safe string (what Sembol's own components render);
+ * `message` is developer-facing and can be technical/blank. Prefer `userMessage`, falling
+ * back to `message` only if it's empty.
+ */
+function userFacingMessage(err: unknown): string {
+  const sembolError = toSembolError(err);
+  return sembolError.userMessage || sembolError.message;
+}
+
+/**
  * Thin wrapper around Sembol's passkey smart-wallet hook, shaped for this app's needs.
  * Public shape kept stable (`address`, `error`, `connect`, `disconnect`) so consumers like
  * `PoolView` don't need to change; `createWallet` and `status` are additive.
@@ -43,7 +53,7 @@ export function useWallet() {
       // User-cancelled WebAuthn prompts (closed the dialog, backed out) are a normal
       // non-event, not an error worth surfacing.
       if (sembolError.code === "user_cancelled") return;
-      setError(sembolError.message);
+      setError(userFacingMessage(err));
     }
   }, [ctx]);
 
@@ -55,14 +65,16 @@ export function useWallet() {
     } catch (err) {
       const sembolError = toSembolError(err);
       if (sembolError.code === "user_cancelled") return;
-      setError(sembolError.message);
+      setError(userFacingMessage(err));
     }
   }, [ctx]);
 
   const disconnect = useCallback(() => {
     if (!ctx) return;
     setError(null);
-    void ctx.disconnect();
+    ctx.disconnect().catch((err: unknown) => {
+      setError(userFacingMessage(err));
+    });
   }, [ctx]);
 
   return {

@@ -8,8 +8,8 @@ vi.mock("@sembol/passkey-react", () => ({
   usePasskeyWallet: () => usePasskeyWallet(),
   toSembolError: (err: unknown) => {
     if (err && typeof err === "object" && "code" in err) return err;
-    if (err instanceof Error) return { code: "unknown", message: err.message };
-    return { code: "unknown", message: String(err) };
+    if (err instanceof Error) return { code: "unknown", message: err.message, userMessage: "" };
+    return { code: "unknown", message: String(err), userMessage: "" };
   },
 }));
 
@@ -27,7 +27,7 @@ function makeCtx(overrides: Partial<Record<string, unknown>> = {}) {
     signals: { on: vi.fn(), emit: vi.fn() },
     connect: vi.fn(),
     createWallet: vi.fn(),
-    disconnect: vi.fn(),
+    disconnect: vi.fn().mockResolvedValue(undefined),
     fund: vi.fn(),
     ...overrides,
   };
@@ -78,8 +78,20 @@ describe("useWallet", () => {
     expect(result.current.error).toBeNull();
   });
 
-  it("stores a generic rejection from connect() as error", async () => {
-    const connect = vi.fn().mockRejectedValue({ code: "network_error", message: "boom" });
+  it("stores a generic rejection from connect() as the curated user message", async () => {
+    const connect = vi
+      .fn()
+      .mockRejectedValue({ code: "network_error", message: "fetch failed: ECONNRESET", userMessage: "Network hiccup — try again." });
+    usePasskeyWallet.mockReturnValue(makeCtx({ connect }));
+    const { result } = renderHook(() => useWallet());
+    await act(async () => {
+      await result.current.connect();
+    });
+    expect(result.current.error).toBe("Network hiccup — try again.");
+  });
+
+  it("falls back to the developer message when userMessage is empty", async () => {
+    const connect = vi.fn().mockRejectedValue({ code: "network_error", message: "boom", userMessage: "" });
     usePasskeyWallet.mockReturnValue(makeCtx({ connect }));
     const { result } = renderHook(() => useWallet());
     await act(async () => {
@@ -88,18 +100,20 @@ describe("useWallet", () => {
     expect(result.current.error).toBe("boom");
   });
 
-  it("stores a generic rejection from createWallet() as error", async () => {
-    const createWallet = vi.fn().mockRejectedValue({ code: "unknown", message: "deploy failed" });
+  it("stores a generic rejection from createWallet() as the curated user message", async () => {
+    const createWallet = vi
+      .fn()
+      .mockRejectedValue({ code: "unknown", message: "deploy failed: sim error", userMessage: "Couldn't create your wallet. Try again." });
     usePasskeyWallet.mockReturnValue(makeCtx({ createWallet }));
     const { result } = renderHook(() => useWallet());
     await act(async () => {
       await result.current.createWallet();
     });
-    expect(result.current.error).toBe("deploy failed");
+    expect(result.current.error).toBe("Couldn't create your wallet. Try again.");
   });
 
   it("disconnect() calls through to the kit", () => {
-    const disconnect = vi.fn();
+    const disconnect = vi.fn().mockResolvedValue(undefined);
     usePasskeyWallet.mockReturnValue(
       makeCtx({ address: "CABC1234567890XYZ", status: "connected", disconnect }),
     );
@@ -108,5 +122,22 @@ describe("useWallet", () => {
       result.current.disconnect();
     });
     expect(disconnect).toHaveBeenCalled();
+  });
+
+  it("disconnect() rejection is normalised into error, not an unhandled rejection", async () => {
+    const disconnect = vi
+      .fn()
+      .mockRejectedValue({ code: "network_error", message: "boom", userMessage: "Couldn't disconnect. Try again." });
+    usePasskeyWallet.mockReturnValue(
+      makeCtx({ address: "CABC1234567890XYZ", status: "connected", disconnect }),
+    );
+    const { result } = renderHook(() => useWallet());
+    await act(async () => {
+      result.current.disconnect();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(disconnect).toHaveBeenCalled();
+    expect(result.current.error).toBe("Couldn't disconnect. Try again.");
   });
 });
