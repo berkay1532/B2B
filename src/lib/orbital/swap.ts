@@ -1,4 +1,4 @@
-import { cloneTick, planeSum, poolPrice, pricingTicks, sumX } from "./tick";
+import { cloneTick, planeSum, poolPrice, pricingTicks } from "./tick";
 import { OrbitalError, type QuoteResult, type Tick } from "./types";
 
 const REL_EPS = 1e-12;
@@ -47,14 +47,22 @@ export function quote(ticks: Tick[], tokenIn: number, tokenOut: number, amountIn
   if (tokenIn === tokenOut) throw new OrbitalError("SameToken");
   if (!(amountIn > 0) || !Number.isFinite(amountIn)) throw new OrbitalError("InvalidAmount");
   if (ticks.length === 0) throw new OrbitalError("InsufficientLiquidity", "no ticks");
+  const n = ticks[0].x.length;
+  if (
+    !Number.isInteger(tokenIn) || !Number.isInteger(tokenOut) ||
+    tokenIn < 0 || tokenIn >= n || tokenOut < 0 || tokenOut >= n
+  ) {
+    throw new OrbitalError("InvalidAmount", "token index out of range");
+  }
 
   const work = ticks.map(cloneTick);
-  const priceBefore = poolPrice(pricingTicks(work), tokenOut, tokenIn);
 
   // A frozen boundary tick can trade again if this direction moves it inward.
   for (const t of work) {
     if (t.state === "boundary" && t.x[tokenIn] < t.x[tokenOut]) t.state = "interior";
   }
+
+  const priceBefore = poolPrice(pricingTicks(work), tokenOut, tokenIn);
 
   let remaining = amountIn;
   let out = 0;
@@ -62,26 +70,39 @@ export function quote(ticks: Tick[], tokenIn: number, tokenOut: number, amountIn
 
   for (let seg = 0; seg < MAX_SEGMENTS && remaining > amountIn * REL_EPS; seg++) {
     const active = work.filter((t) => t.state === "interior");
-    if (active.length === 0) throw new OrbitalError("InsufficientLiquidity", "InsufficientLiquidity: every tick is at its boundary");
+    if (active.length === 0) throw new OrbitalError("InsufficientLiquidity", "every tick is at its boundary");
     const Rsum = active.reduce((a, t) => a + t.radius, 0);
 
-    // largest fraction of `remaining` we can apply before some tick reaches its plane
+    // largest fraction of `remaining` we can apply before some tick reaches its plane.
+    // caps[k] is tick k's *pre-swap* room to its plane in this direction, used
+    // below to catch near-ties without relying on a raw post-swap sumX check
+    // (which would wrongly refreeze a tick that starts this trade already
+    // sitting on its plane, e.g. one just reactivated because this trade moves
+    // it inward and therefore has abundant, not zero, room to move).
     let f = 1;
     let landing: Tick | null = null;
+    const caps = new Map<Tick, number>();
+    const shares = new Map<Tick, number>();
     for (const t of active) {
       const share = (remaining * t.radius) / Rsum;
       const cap = deltaToPlane(t, tokenIn, tokenOut);
+      caps.set(t, cap);
+      shares.set(t, share);
       if (cap < share && cap / share < f) { f = cap / share; landing = t; }
     }
 
     for (const t of active) {
-      const share = ((remaining * t.radius) / Rsum) * f;
+      const share = shares.get(t)! * f;
       out += applySwap(t, tokenIn, tokenOut, share);
     }
     if (landing) { landing.state = "boundary"; crossed++; }
-    // also catch ticks that landed within tolerance without being the minimum
+    // also catch ticks that landed within tolerance without being the strict
+    // minimum (a near-tie among caps at this iteration's fraction f).
     for (const t of active) {
-      if (t.state === "interior" && sumX(t) >= planeSum(t) * (1 - 1e-12)) { t.state = "boundary"; crossed++; }
+      if (t.state !== "interior") continue;
+      const cap = caps.get(t)!;
+      const appliedShare = shares.get(t)! * f;
+      if (cap - appliedShare <= REL_EPS * t.radius) { t.state = "boundary"; crossed++; }
     }
 
     remaining = f >= 1 ? 0 : remaining * (1 - f);

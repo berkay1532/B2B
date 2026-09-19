@@ -53,7 +53,9 @@ describe("quote", () => {
     const p = 0.9;
     expect(q.priceAfter).toBeGreaterThan((1 / p) * 0.95);
     expect(q.priceAfter).toBeLessThan((1 / p) * 1.05);
-    expect(() => quote(ticks, 0, 1, max * 1.01)).toThrow(/InsufficientLiquidity/);
+    expect(() => quote(ticks, 0, 1, max * 1.01)).toThrow(
+      expect.objectContaining({ code: "InsufficientLiquidity" })
+    );
   });
   it("amount out and price are monotone in amount in", () => {
     let lastOut = 0, lastPrice = 0;
@@ -78,5 +80,13 @@ describe("quote", () => {
   });
   it("pool price at the equal point is 1", () => {
     expect(poolPrice(seed(), 0, 2)).toBeCloseTo(1, 12);
+  });
+  it("priceBefore reflects the same (post-reactivation) tick set as priceAfter", () => {
+    const forward = quote(seed(), 0, 1, 7_000_000);
+    const reverse = quote(forward.ticks, 1, 0, 1);
+    expect(Math.abs(reverse.priceAfter - reverse.priceBefore)).toBeLessThan(1e-6);
+  });
+  it("rejects an out-of-range token index", () => {
+    expect(() => quote(seed(), 0, 5, 1000)).toThrow(OrbitalError);
   });
 });

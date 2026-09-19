@@ -23,7 +23,7 @@ export type OrbitalErrorCode =
 
 export class OrbitalError extends Error {
   constructor(public code: OrbitalErrorCode, message?: string) {
-    super(message ?? code);
+    super(message ? `${code}: ${message}` : code);
     this.name = "OrbitalError";
   }
 }
