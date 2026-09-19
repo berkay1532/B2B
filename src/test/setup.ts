@@ -23,6 +23,14 @@ vi.mock("@sembol/passkey-react", () => ({
   // module scope, so any test importing it (e.g. WalletProvider.test.tsx, or layout-level
   // imports) needs these to exist even though nothing here exercises real wallet behavior.
   PasskeyWalletProvider: ({ children }: { children: ReactNode }) => children,
+  useWalletAddress: () => {
+    throw new Error("Sembol hooks and components must be used inside <PasskeyWalletProvider />.");
+  },
+  useWalletBalance: () => {
+    throw new Error("Sembol hooks and components must be used inside <PasskeyWalletProvider />.");
+  },
+  explorerUrl: () => null,
+  truncateAddress: (address: string, start = 4, end = 4) => `${address.slice(0, start)}…${address.slice(-end)}`,
   SEMBOL_TESTNET_ARTIFACTS: {
     rpcUrl: "https://soroban-testnet.stellar.org",
     networkPassphrase: "Test SDF Network ; September 2015",
