@@ -76,7 +76,11 @@ export class MockPoolClient implements PoolClient {
     // existing tick: amounts must match its current real-reserve proportions
     const t = cloneTick(tick);
     const real = realReserves(t);
+    if (real.some((r) => !(r > 0) || !Number.isFinite(r))) {
+      throw new PoolError("ProportionMismatch", "tick has a drained reserve; deposit into a fresh tick instead");
+    }
     const ratio = amounts[0] / real[0];
+    if (!(ratio > 0) || !Number.isFinite(ratio)) throw new PoolError("ProportionMismatch", "amounts must match pool proportions");
     for (let k = 1; k < this.n; k++) {
       if (Math.abs(amounts[k] / real[k] - ratio) / ratio > 0.01) throw new PoolError("ProportionMismatch", "amounts must match pool proportions");
     }

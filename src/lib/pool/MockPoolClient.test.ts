@@ -36,7 +36,7 @@ describe("MockPoolClient", () => {
   });
   it("maps InsufficientLiquidity", async () => {
     const c = new MockPoolClient({ realPerTokenPerTick: 1000, depegBpsList: [100] });
-    await expect(c.quote("USDC", "EURC", toUnits(1_000_000))).rejects.toBeInstanceOf(PoolError);
+    await expect(c.quote("USDC", "EURC", toUnits(1_000_000))).rejects.toMatchObject({ code: "InsufficientLiquidity" });
   });
   it("deposit into an existing tick grows tvl proportionally", async () => {
     const c = new MockPoolClient();
@@ -48,6 +48,20 @@ describe("MockPoolClient", () => {
   it("deposit rejects wrong proportions", async () => {
     const c = new MockPoolClient();
     await expect(c.deposit({ from: "G", amounts: [toUnits(100), toUnits(50), toUnits(100)], depegBps: 500 }))
+      .rejects.toMatchObject({ code: "ProportionMismatch" });
+  });
+  it("deposit rejects a zero amount rather than dividing by it", async () => {
+    const c = new MockPoolClient();
+    await expect(c.deposit({ from: "G", amounts: [toUnits(100), 0n, toUnits(100)], depegBps: 500 }))
+      .rejects.toMatchObject({ code: "ProportionMismatch" });
+  });
+  it("deposit rejects into a tick with a drained (zero) real reserve", async () => {
+    const c = new MockPoolClient();
+    // Force tick 0's real reserve for token 1 to exactly 0 (as if fully drained
+    // toward its boundary), bypassing the swap engine to isolate this guard.
+    const ticks = (c as any).ticks;
+    ticks[0].x[1] = ticks[0].xMinNorm * ticks[0].radius;
+    await expect(c.deposit({ from: "G", amounts: [toUnits(100), toUnits(100), toUnits(100)], depegBps: ticks[0].depegBps }))
       .rejects.toMatchObject({ code: "ProportionMismatch" });
   });
   it("reset restores the seed", async () => {
