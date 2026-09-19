@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTick, invariantResidual, poolPrice, sumX, planeSum } from "./tick";
-import { quote, maxFillable, deltaToPlane } from "./swap";
+import { quote, maxFillable, deltaToPlane, tickLandingAmounts } from "./swap";
 import { OrbitalError } from "./types";
 
 const seed = () => [10, 100, 500, 1000].map((bps) => createTick(`t${bps}`, bps, 2_500_000, 3));
@@ -90,5 +90,42 @@ describe("quote", () => {
   });
   it("rejects an out-of-range token index", () => {
     expect(() => quote(seed(), 0, 5, 1000)).toThrow(OrbitalError);
+  });
+});
+
+describe("tickLandingAmounts", () => {
+  it("returns one increasing landing amount per interior tick, tightest first", () => {
+    const ticks = seed();
+    const landings = tickLandingAmounts(ticks, 0, 1);
+    expect(landings.map((l) => l.depegBps)).toEqual([10, 100, 500, 1000]);
+    const amounts = landings.map((l) => l.amountIn);
+    for (let k = 1; k < amounts.length; k++) expect(amounts[k]).toBeGreaterThan(amounts[k - 1]);
+    // the 10 bps tick — the tightest — lands near 2.2M on the $30M seed pool
+    expect(amounts[0]).toBeGreaterThan(2_000_000);
+    expect(amounts[0]).toBeLessThan(2_500_000);
+    // and no tick lands past what the pool can fill
+    expect(amounts[amounts.length - 1]).toBeLessThanOrEqual(maxFillable(ticks, 0, 1));
+  });
+
+  it("brackets each landing: one unit more flips the tick, one unit less does not", () => {
+    const ticks = seed();
+    // the widest tick lands exactly at the liquidity edge, where +1 no longer quotes
+    const landings = tickLandingAmounts(ticks, 0, 1).slice(0, -1);
+    expect(landings.length).toBeGreaterThan(0);
+    for (const { depegBps, amountIn } of landings) {
+      const k = ticks.findIndex((t) => t.depegBps === depegBps);
+      expect(quote(ticks, 0, 1, amountIn + 1).ticks[k].state).toBe("boundary");
+      expect(quote(ticks, 0, 1, amountIn - 1).ticks[k].state).toBe("interior");
+    }
+  });
+
+  it("skips ticks that are already at their boundary and degenerate inputs", () => {
+    const ticks = quote(seed(), 0, 1, 6_000_000).ticks;
+    const boundary = ticks.filter((t) => t.state === "boundary").map((t) => t.depegBps);
+    expect(boundary.length).toBeGreaterThan(0);
+    const landings = tickLandingAmounts(ticks, 0, 1);
+    for (const l of landings) expect(boundary).not.toContain(l.depegBps);
+    expect(tickLandingAmounts([], 0, 1)).toEqual([]);
+    expect(tickLandingAmounts(seed(), 1, 1)).toEqual([]);
   });
 });

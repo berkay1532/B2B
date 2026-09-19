@@ -122,3 +122,38 @@ export function maxFillable(ticks: Tick[], tokenIn: number, tokenOut: number): n
   }
   return lo;
 }
+
+/**
+ * For every currently-interior tick, the input amount of `tokenIn` at which that tick
+ * lands on its plane (flips to boundary). Found by bisection on the post-quote state,
+ * 40 rounds, upper bound `maxFillable`. Ticks that never land within the fillable range
+ * are omitted. Result is sorted by `amountIn` ascending — the order the slider draws them.
+ */
+export function tickLandingAmounts(
+  ticks: Tick[],
+  tokenIn: number,
+  tokenOut: number,
+): { depegBps: number; amountIn: number }[] {
+  if (ticks.length === 0 || tokenIn === tokenOut) return [];
+  let top: number;
+  try { top = maxFillable(ticks, tokenIn, tokenOut); } catch { return []; }
+  if (!(top > 0)) return [];
+
+  const isBoundary = (k: number, amountIn: number): boolean => {
+    try { return quote(ticks, tokenIn, tokenOut, amountIn).ticks[k].state === "boundary"; }
+    catch { return true; } // past the liquidity edge every tick is pinned
+  };
+
+  const out: { depegBps: number; amountIn: number }[] = [];
+  ticks.forEach((t, k) => {
+    if (t.state !== "interior") return;
+    if (!isBoundary(k, top)) return; // never lands inside the fillable range
+    let lo = 0, hi = top;
+    for (let r = 0; r < 40; r++) {
+      const mid = (lo + hi) / 2;
+      if (isBoundary(k, mid)) hi = mid; else lo = mid;
+    }
+    out.push({ depegBps: t.depegBps, amountIn: hi });
+  });
+  return out.sort((a, b) => a.amountIn - b.amountIn);
+}
