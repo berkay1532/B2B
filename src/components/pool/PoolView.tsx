@@ -5,6 +5,7 @@ import { TOKENS, tokenIndex } from "@/config/tokens";
 import { fromUnits, toUnits, PoolError, type Quote } from "@/lib/pool";
 import { ticksFromState } from "@/lib/pool/reconstruct";
 import { capitalEfficiency, poolPrice, poolRealReserves, pricingTicks, quote as mathQuote, type Tick } from "@/lib/orbital";
+import { cpQuote, classicApply, classicSeed } from "@/lib/classic/constantProduct";
 import { TickPlanes } from "./TickPlanes";
 import { TwoTokenCurve } from "./TwoTokenCurve";
 import { SwapForm } from "./SwapForm";
@@ -22,6 +23,7 @@ export function PoolView() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [prevTicks, setPrevTicks] = useState<Tick[] | undefined>();
+  const [classic, setClassic] = useState<number[] | null>(null);
 
   // committed math-level ticks
   const ticks = useMemo<Tick[]>(() => {
@@ -30,8 +32,17 @@ export function PoolView() {
     return g ? g.call(client) : ticksFromState(state);
   }, [state, client]);
 
+  // seed the classic comparison pool once from the committed real reserves
+  useEffect(() => {
+    if (classic === null && ticks.length) setClassic(classicSeed(poolRealReserves(ticks)));
+  }, [ticks, classic]);
+
   const i = tokenIndex(tokenIn), j = tokenIndex(tokenOut);
   const amountNum = Number(amount);
+  // gated on the resolved orbital quote so the comparison row appears in step with quote-out,
+  // instead of racing ahead of the debounced client round trip.
+  const classicQuote = classic && quote && amountNum > 0 ? cpQuote(classic[i], classic[j], amountNum) : null;
+  const classicPreview = classicQuote ? classicApply(classic!, i, j, amountNum) : undefined;
 
   // live preview from the pure math library (no client round trip)
   const previewTicks = useMemo<Tick[] | null>(() => {
@@ -65,11 +76,12 @@ export function PoolView() {
     try {
       setPrevTicks(ticks);
       await client.swap({ from: "", tokenIn, tokenOut, amountIn: toUnits(amountNum), minOut: (quote.amountOut * 995n) / 1000n });
+      setClassic((c) => (c ? classicApply(c, i, j, amountNum) : c));
       setAmount("");
     } catch (e) { setError(e instanceof PoolError ? e.message : String(e)); }
     finally { setBusy(false); }
   };
-  const reset = async () => { await client.reset?.(); setPrevTicks(undefined); setAmount(""); };
+  const reset = async () => { await client.reset?.(); setPrevTicks(undefined); setAmount(""); setClassic(null); };
   const flip = () => { setTokenIn(tokenOut); setTokenOut(tokenIn); };
   const pickIn = (c: string) => { if (c === tokenOut) setTokenOut(tokenIn); setTokenIn(c); };
   const pickOut = (c: string) => { if (c === tokenIn) setTokenIn(tokenOut); setTokenOut(c); };
@@ -82,12 +94,15 @@ export function PoolView() {
       </section>
       <section className="border border-line p-4">
         <h2 className="mb-2 font-mono text-xs text-muted">// SECTION B · {tokenIn}/{tokenOut} PLANE</h2>
-        {shown.length > 0 && <TwoTokenCurve ticks={shown} i={i} j={j} prev={ghost} />}
+        {shown.length > 0 && (
+          <TwoTokenCurve ticks={shown} i={i} j={j} prev={ghost} classic={classic ?? reserves} classicPreview={classicPreview} />
+        )}
       </section>
       <section className="flex flex-col gap-6 border border-line p-4">
         <h2 className="font-mono text-xs text-muted">// SECTION C · SWAP</h2>
         <SwapForm tokenIn={tokenIn} tokenOut={tokenOut} amount={amount} maxAmount={state.reserves.map(fromUnits)[i] * 2}
           quoteOut={quote ? fromUnits(quote.amountOut) : null} price={quote?.priceAfter ?? null} error={error} busy={busy}
+          classic={classicQuote ? { amountOut: classicQuote.amountOut, price: classicQuote.priceAfter } : null}
           onTokenIn={pickIn} onTokenOut={pickOut} onAmount={setAmount} onFlip={flip} onCommit={commit} onReset={reset} />
         <ReservesTable reserves={reserves} prices={prices} tvl={tvl} />
         <TicksTable ticks={tickRows} />

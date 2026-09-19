@@ -6,6 +6,7 @@ export interface SwapFormProps {
   tokenIn: string; tokenOut: string; amount: string;
   maxAmount: number;
   quoteOut: number | null; price: number | null; error: string | null; busy: boolean;
+  classic: { amountOut: number; price: number } | null;
   onTokenIn(code: string): void; onTokenOut(code: string): void; onAmount(v: string): void;
   onFlip(): void; onCommit(): void; onReset(): void;
 }
@@ -29,8 +30,12 @@ export function SwapForm(p: SwapFormProps) {
       <button type="button" onClick={p.onFlip} className="self-center text-muted">⇅</button>
       <div className="flex items-center justify-between"><span className="text-muted">RECEIVE</span><Sel value={p.tokenOut} onChange={p.onTokenOut} /></div>
       <div className="rounded border border-line px-3 py-2">
-        <div data-testid="quote-out" className="text-lg">{p.quoteOut === null ? "—" : formatUsd(p.quoteOut)}</div>
+        <div data-testid="quote-out" data-value={p.quoteOut ?? ""} className="text-lg">{p.quoteOut === null ? "—" : formatUsd(p.quoteOut)}</div>
         <div className="text-xs text-muted">{p.price === null ? "" : `1 ${p.tokenIn} ≈ ${(1 / p.price).toFixed(5)} ${p.tokenOut}`}</div>
+      </div>
+      <div className="flex items-center justify-between rounded border border-dashed border-line px-3 py-2 text-xs text-muted">
+        <span>CLASSIC x·y=k</span>
+        <span data-testid="classic-out" data-value={p.classic?.amountOut ?? ""}>{p.classic ? `${formatUsd(p.classic.amountOut)} · 1 ${p.tokenIn} ≈ ${(1 / p.classic.price).toFixed(5)} ${p.tokenOut}` : "—"}</span>
       </div>
       {p.error && <div className="text-xs text-boundary">{p.error}</div>}
       <div className="flex gap-2">

@@ -1,34 +1,56 @@
 "use client";
-import type { Tick } from "@/lib/orbital";
+import { useMemo } from "react";
+import { maxFillable, poolRealReserves, quote, type Tick } from "@/lib/orbital";
 import { TOKENS } from "@/config/tokens";
 
-/** Consolidated sphere for display: R = sum R_t, x = sum x_t. */
-export function TwoTokenCurve({ ticks, i, j, prev }: { ticks: Tick[]; i: number; j: number; prev?: Tick[] }) {
-  const w = 460, h = 380, pad = 40;
-  const R = ticks.reduce((a, t) => a + t.radius, 0);
-  const x = [0, 1, 2].map((k) => ticks.reduce((a, t) => a + t.x[k], 0));
-  const S = [0, 1, 2].filter((k) => k !== i && k !== j).reduce((a, k) => a + (R - x[k]) ** 2, 0);
-  const f = (xi: number) => { const rad = R * R - (R - xi) ** 2 - S; return rad < 0 ? NaN : R - Math.sqrt(rad); };
-  const xMin = x[i] * 0.4, xMax = Math.min(R, x[i] * 2.4);
-  const ys = [] as number[]; const pts = [] as [number, number][];
-  for (let k = 0; k <= 120; k++) { const xi = xMin + ((xMax - xMin) * k) / 120; const yj = f(xi); if (Number.isFinite(yj)) { pts.push([xi, yj]); ys.push(yj); } }
-  // ys can be empty if every sample lands off the sphere (NaN); fall back to
-  // the current point so the axis scale never divides by an Infinity/-Infinity spread.
-  const yMin = ys.length ? Math.min(...ys) : x[j];
-  const yMax = ys.length ? Math.max(...ys) : x[j];
-  const sx = (v: number) => pad + ((v - xMin) / (xMax - xMin)) * (w - 2 * pad);
+interface Props { ticks: Tick[]; i: number; j: number; prev?: Tick[]; classic: number[]; classicPreview?: number[] }
+
+/** Both curves on real-reserve axes: Orbital sampled through quote(), classic as y = k/x. */
+export function TwoTokenCurve({ ticks, i, j, prev, classic, classicPreview }: Props) {
+  const w = 460, h = 380, pad = 40, N = 40;
+
+  const { orbital, cur } = useMemo(() => {
+    const real = poolRealReserves(ticks);
+    const cur: [number, number] = [real[i], real[j]];
+
+    // Orbital: sample forward (sell i) and backward (sell j) up to what the ticks can absorb, capped for readability
+    const fwdMax = Math.min(maxFillable(ticks, i, j), real[i] * 1.5);
+    const bwdMax = Math.min(maxFillable(ticks, j, i), real[j] * 1.5);
+    const orbital: [number, number][] = [];
+    for (let k = N; k >= 1; k--) { try { const r = poolRealReserves(quote(ticks, j, i, (bwdMax * k) / N).ticks); orbital.push([r[i], r[j]]); } catch { /* skip */ } }
+    orbital.push(cur);
+    for (let k = 1; k <= N; k++) { try { const r = poolRealReserves(quote(ticks, i, j, (fwdMax * k) / N).ticks); orbital.push([r[i], r[j]]); } catch { /* skip */ } }
+
+    return { orbital, cur };
+  }, [ticks, i, j]);
+
+  // Classic: hyperbola through the committed classic reserves
+  const kc = classic[i] * classic[j];
+  const xs = orbital.map((p) => p[0]);
+  const xMin = Math.min(...xs, classic[i] * 0.5), xMax = Math.max(...xs, classic[i] * 2);
+  const hyper: [number, number][] = Array.from({ length: 2 * N + 1 }, (_, k) => { const x = xMin + ((xMax - xMin) * k) / (2 * N); return [x, kc / x]; });
+
+  const ys = [...orbital.map((p) => p[1]), ...hyper.map((p) => p[1])];
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const sx = (v: number) => pad + ((v - xMin) / (xMax - xMin || 1)) * (w - 2 * pad);
   const sy = (v: number) => h - pad - ((v - yMin) / (yMax - yMin || 1)) * (h - 2 * pad);
-  const d = pts.map(([a, b], k) => `${k ? "L" : "M"}${sx(a)},${sy(b)}`).join(" ");
-  const px = prev ? [0, 1, 2].map((k) => prev.reduce((a, t) => a + t.x[k], 0)) : null;
+  const path = (pts: [number, number][]) => pts.map(([a, b], k) => `${k ? "L" : "M"}${sx(a)},${sy(b)}`).join(" ");
+  const prevReal = prev ? poolRealReserves(prev) : null;
+  const cp = classicPreview ?? classic;
+
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full" role="img" aria-label="two token curve">
-      <path d={d} fill="none" className="stroke-fg" strokeWidth={1.5} />
       <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} className="stroke-line" />
       <line x1={pad} y1={pad} x2={pad} y2={h - pad} className="stroke-line" />
-      <text x={w - pad} y={h - 12} textAnchor="end" className="fill-muted font-mono text-[10px]">{TOKENS[i].code} reserve →</text>
+      <path d={path(hyper)} fill="none" className="stroke-muted" strokeWidth={1} strokeDasharray="4 4" />
+      <path d={path(orbital)} fill="none" className="stroke-fg" strokeWidth={1.5} />
+      <text x={w - pad} y={h - 12} textAnchor="end" className="fill-muted font-mono text-[10px]">{TOKENS[i].code} real reserve →</text>
       <text x={pad} y={pad - 10} className="fill-muted font-mono text-[10px]">↑ {TOKENS[j].code}</text>
-      {px && <circle cx={sx(px[i])} cy={sy(px[j])} r={4} className="fill-muted opacity-50" />}
-      <circle cx={sx(x[i])} cy={sy(x[j])} r={5} className="fill-accent" />
+      <text x={w - pad} y={pad} textAnchor="end" className="fill-muted font-mono text-[10px]">dashed = x·y=k · solid = orbital</text>
+      {prevReal && <circle cx={sx(prevReal[i])} cy={sy(prevReal[j])} r={4} className="fill-muted opacity-50" />}
+      {classicPreview && <circle cx={sx(classic[i])} cy={sy(classic[j])} r={4} className="fill-muted opacity-30" />}
+      <circle cx={sx(cp[i])} cy={sy(cp[j])} r={5} fill="none" className="stroke-muted" strokeWidth={1.5} />
+      <circle cx={sx(cur[0])} cy={sy(cur[1])} r={5} className="fill-accent" />
     </svg>
   );
 }
