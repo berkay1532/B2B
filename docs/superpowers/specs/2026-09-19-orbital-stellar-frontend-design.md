@@ -34,8 +34,13 @@ The demo must show a jury two things:
 - Wallet: `@creit.tech/stellar-wallets-kit` (Freighter and others), testnet
 - Chain access (later): `@stellar/stellar-sdk` + generated contract bindings
 - Tests: vitest
-- Numbers: `bigint` fixed-point with 7 decimals (Stellar stroop scale) in the
-  math layer. UI converts to display strings at the edge only.
+- Numbers: the math layer works in float64 `number` token units (1.0 = one
+  token). The adapter boundary (`lib/pool`) exchanges `bigint` at 7 decimals
+  (Stellar stroop scale) with callers, so the UI and the future Soroban
+  client speak the contract's unit. Float64 carries 15 significant digits;
+  the tightest tick in the demo needs 6. The contract's i128 results will
+  match within rounding, not bit for bit; a differential test with a
+  tolerance is planned once the contract exists.
 
 ## 4. Architecture
 
@@ -44,13 +49,12 @@ Three layers with one-directional dependencies: `ui -> pool -> orbital`.
 ```
 src/
   lib/orbital/        pure math, no React, no chain
-    types.ts          Token, Reserves, Tick, PoolState
-    fixed.ts          bigint fixed-point helpers (mul, div, sqrt, SCALE)
-    sphere.ts         invariant, equal-price point, price at a state
-    ticks.ts          depeg limit -> plane constant c, classify interior/boundary,
-                      capital efficiency R/c
-    swap.ts           quote(state, tokenIn, tokenOut, amountIn) with Newton solve
-                      and tick-crossing segmentation
+    types.ts          Tick, TickState, QuoteResult, OrbitalError
+    geometry.ts       kappaFromDepeg, xMinNorm, equalPointNorm, capitalEfficiency
+    tick.ts           createTick, sumX, planeSum, realReserves, invariantResidual,
+                      marginalPrice, poolPrice
+    swap.ts           quote (closed-form sphere step + plane crossing), maxFillable
+    projection.ts     2D projection of the reserve state for the tick-planes SVG
     index.ts
   lib/pool/           adapter boundary
     PoolClient.ts     interface (below)
@@ -70,34 +74,53 @@ src/
 
 ### 4.1 Math layer (`lib/orbital`)
 
-All functions are pure and deterministic. Inputs and outputs are `bigint`
-at 7 decimals unless stated.
+All functions are pure and deterministic. Inputs and outputs are float64
+token units (see section 3).
 
-- **Invariant.** Sphere: `sum_i (r_i)^2 = R^2`. Equal-price point:
-  `r_i = R / sqrt(n)` for all i. With virtual reserves, the effective
-  reserve is `r_i + v` where `v = c / sqrt(n)` is the per-token virtual
-  amount for a tick with plane constant `c`.
-- **Ticks.** A tick is `{ depegBps, radius }`. From a depeg price `p`
-  (e.g. 0.95 = 9500 bps) the plane constant `c` is derived per the paper's
-  depeg formula. Classification: interior if the projection of reserves on
-  the equal-price direction is below `c`, otherwise boundary. Capital
-  efficiency reported as `R / c` (display only).
+- **Invariant.** Sphere centered at `(R, ..., R)`:
+  `sum_i (R - x_i)^2 = R^2` over effective reserves `x_i <= R`. Equal-price
+  point: `x_i = R (1 - 1/sqrt(n))`. Marginal price of i in j:
+  `(R - x_i) / (R - x_j)`. Real reserves are `x_i - xMin(kappa) * R`, where
+  `xMin` is the smallest normalized reserve reachable inside the tick (the
+  virtual part the LP never deposits). Capital efficiency is
+  `xEq / (xEq - xMin)`; for n = 3 this gives 1098x, 110x, 21.8x, 10.8x at
+  10, 100, 500, 1000 bps, matching the reference simulation and the
+  paper's 5-asset figures (15x at 1000 bps, ~150x at 100 bps).
+- **Ticks.** A tick is `{ depegBps, radius }` where `depegBps` is the
+  allowed drop below peg in basis points (100 = the coin may fall to 0.99).
+  From `p = 1 - depegBps/10000` the normalized plane constant is
+  `kappa(p) = (n - (p + n - 1) / sqrt(p^2 + n - 1)) / sqrt(n)` (derived from
+  the state where one coin sits at price `p` and the others are equal). Classification: interior while
+  `sum_i x_i < kappa * R * sqrt(n)`, boundary once the sum reaches that
+  plane.
 - **Consolidation.** All interior ticks sum into one sphere (radius
   `R_int`), all boundary ticks into one lower-dimensional sphere
   (`R_bound`). The global invariant is the torus form from the paper. v1
   may implement the single-tick and the all-interior cases first, then
   add boundary consolidation; the public `quote` signature does not change.
-- **Swap.** `quote(state, tokenIn, tokenOut, amountIn)` returns
-  `{ amountOut, ticksCrossed, finalState, priceAfter }`. Algorithm:
-  1. assume no crossing, solve `r_out` via Newton on the invariant
-  2. check whether any tick changed class along the path
-  3. if so, solve for the exact crossing point, reclassify, continue with
-     the remainder (loop)
-  Newton iteration count is capped (e.g. 32) and convergence tolerance is
-  1 stroop. Root selection keeps every reserve below its tick center.
-- **Prices.** Marginal price of token i in units of token j is the ratio of
-  partial derivatives of the invariant, i.e. `(r_i + v) / (r_j + v)` on the
-  sphere. Exposed for the reserves table and the attack demo.
+- **Swap.** `quote(ticks, tokenIn, tokenOut, amountIn)` returns
+  `{ amountOut, ticksCrossed, ticks, priceBefore, priceAfter }`. On a single
+  sphere the out reserve is closed form
+  (`x_out' = R - sqrt(R^2 - (R - x_in')^2 - S_others)`), and the exact
+  input that carries a tick onto its plane is the root of a quadratic, so
+  v1 needs no Newton iteration. Algorithm:
+  1. a boundary tick rejoins the interior set for this swap if the trade
+     moves it inward (its reserve of `tokenIn` is below its reserve of
+     `tokenOut`)
+  2. split the remaining input across interior ticks proportionally to
+     their radii
+  3. for each tick compute the input that reaches its plane; scale the
+     step so the first such tick lands exactly on it, apply the step to
+     every interior tick, mark that tick boundary, loop with the remainder
+  4. when no interior tick remains, throw `InsufficientLiquidity`
+  v1 simplification: a boundary tick is frozen (it does not trade the
+  remaining n-1 coins on its circle as in the paper's torus model). This
+  under-quotes slightly relative to the paper and is the one place the
+  contract may diverge; the torus consolidation is a follow-up.
+- **Prices.** Pool-level marginal price of token i in units of token j is
+  `sum_t (R_t - x_t,i) / sum_t (R_t - x_t,j)` over all ticks. The reserves
+  table shows each token priced in the token not involved in the current
+  swap (the numeraire), which stays at 1.0.
 
 ### 4.2 Pool adapter (`lib/pool`)
 
@@ -212,11 +235,14 @@ config change, not a rewrite.
 
 - `lib/orbital` unit tests (vitest):
   - at the equal-price point all marginal prices are 1.0
+  - capital efficiency matches the reference figures above within 1%
   - a swap of 1 unit in a $30M pool moves price by less than 1 bps
-  - invariant holds before and after every quote (within 1 stroop)
+  - every tick's invariant holds after every quote (relative 1e-9)
   - a large swap flips ticks to boundary in order from tightest to widest
-  - price never exceeds the bound implied by the outermost tick
-  - round trip A->B->A loses only rounding, never gains
+  - once every tick is boundary, quoting more throws
+    `InsufficientLiquidity`, and the price at that point is within 5% of
+    `1/p` of the widest tick
+  - round trip A->B->A returns no more than was sent
 - `MockPoolClient` tests: state after swap matches `quote.finalState`.
 - UI: smoke render tests for the two pages. No E2E in v1.
 
