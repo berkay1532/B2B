@@ -25,18 +25,27 @@ export function TwoTokenCurve({ ticks, i, j, prev, classic, classicPreview }: Pr
   }, [ticks, i, j]);
 
   // Classic: hyperbola through the committed classic reserves
+  const cp = classicPreview ?? classic;
   const kc = classic[i] * classic[j];
-  const xs = orbital.map((p) => p[0]);
-  const xMin = Math.min(...xs, classic[i] * 0.5), xMax = Math.max(...xs, classic[i] * 2);
+
+  // Ranges must cover the Orbital samples, the baseline classic curve, AND the
+  // (possibly preview) classic dot — a large slider amount can push cp[i]/cp[j]
+  // well past classic[i]*2 / the Orbital sample span, which would otherwise
+  // render the hollow dot off-chart. A small margin keeps dots off the border.
+  const xs = [...orbital.map((p) => p[0]), classic[i] * 0.5, classic[i] * 2, cp[i]];
+  const xMin0 = Math.min(...xs), xMax0 = Math.max(...xs);
+  const xMargin = (xMax0 - xMin0 || xMax0 || 1) * 0.08;
+  const xMin = xMin0 - xMargin, xMax = xMax0 + xMargin;
   const hyper: [number, number][] = Array.from({ length: 2 * N + 1 }, (_, k) => { const x = xMin + ((xMax - xMin) * k) / (2 * N); return [x, kc / x]; });
 
-  const ys = [...orbital.map((p) => p[1]), ...hyper.map((p) => p[1])];
-  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const ys = [...orbital.map((p) => p[1]), ...hyper.map((p) => p[1]), cp[j], classic[j]];
+  const yMin0 = Math.min(...ys), yMax0 = Math.max(...ys);
+  const yMargin = (yMax0 - yMin0 || yMax0 || 1) * 0.08;
+  const yMin = yMin0 - yMargin, yMax = yMax0 + yMargin;
   const sx = (v: number) => pad + ((v - xMin) / (xMax - xMin || 1)) * (w - 2 * pad);
   const sy = (v: number) => h - pad - ((v - yMin) / (yMax - yMin || 1)) * (h - 2 * pad);
   const path = (pts: [number, number][]) => pts.map(([a, b], k) => `${k ? "L" : "M"}${sx(a)},${sy(b)}`).join(" ");
   const prevReal = prev ? poolRealReserves(prev) : null;
-  const cp = classicPreview ?? classic;
 
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full" role="img" aria-label="two token curve">
@@ -49,8 +58,8 @@ export function TwoTokenCurve({ ticks, i, j, prev, classic, classicPreview }: Pr
       <text x={w - pad} y={pad} textAnchor="end" className="fill-muted font-mono text-[10px]">dashed = x·y=k · solid = orbital</text>
       {prevReal && <circle cx={sx(prevReal[i])} cy={sy(prevReal[j])} r={4} className="fill-muted opacity-50" />}
       {classicPreview && <circle cx={sx(classic[i])} cy={sy(classic[j])} r={4} className="fill-muted opacity-30" />}
-      <circle cx={sx(cp[i])} cy={sy(cp[j])} r={5} fill="none" className="stroke-muted" strokeWidth={1.5} />
-      <circle cx={sx(cur[0])} cy={sy(cur[1])} r={5} className="fill-accent" />
+      <circle data-testid="classic-dot" cx={sx(cp[i])} cy={sy(cp[j])} r={5} fill="none" className="stroke-muted" strokeWidth={1.5} />
+      <circle data-testid="orbital-dot" cx={sx(cur[0])} cy={sy(cur[1])} r={5} className="fill-accent" />
     </svg>
   );
 }

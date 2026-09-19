@@ -39,9 +39,9 @@ export function PoolView() {
 
   const i = tokenIndex(tokenIn), j = tokenIndex(tokenOut);
   const amountNum = Number(amount);
-  // gated on the resolved orbital quote so the comparison row appears in step with quote-out,
-  // instead of racing ahead of the debounced client round trip.
-  const classicQuote = classic && quote && amountNum > 0 ? cpQuote(classic[i], classic[j], amountNum) : null;
+  // synchronous, independent of the debounced client round trip — the classic row and
+  // classic dot must move instantly with the slider, same as the Orbital preview does.
+  const classicQuote = classic && amountNum > 0 ? cpQuote(classic[i], classic[j], amountNum) : null;
   const classicPreview = classicQuote ? classicApply(classic!, i, j, amountNum) : undefined;
 
   // live preview from the pure math library (no client round trip)
