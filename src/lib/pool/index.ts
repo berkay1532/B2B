@@ -1,3 +1,4 @@
+import { NETWORK } from "@/config/tokens";
 import { MockPoolClient } from "./MockPoolClient";
 import { SorobanPoolClient } from "./SorobanPoolClient";
 import type { PoolClient } from "./PoolClient";
@@ -8,9 +9,9 @@ export function getPoolClient(): PoolClient {
   if (instance) return instance;
   if (process.env.NEXT_PUBLIC_POOL_BACKEND === "soroban") {
     instance = new SorobanPoolClient({
-      rpcUrl: process.env.NEXT_PUBLIC_RPC_URL ?? "https://soroban-testnet.stellar.org",
+      rpcUrl: NETWORK.rpcUrl,
       contractId: process.env.NEXT_PUBLIC_POOL_CONTRACT_ID ?? "",
-      networkPassphrase: "Test SDF Network ; September 2015",
+      networkPassphrase: NETWORK.networkPassphrase,
     });
   } else {
     instance = new MockPoolClient();
@@ -21,3 +22,4 @@ export function getPoolClient(): PoolClient {
 export * from "./PoolClient";
 export * from "./units";
 export { MockPoolClient } from "./MockPoolClient";
+export { SorobanPoolClient } from "./SorobanPoolClient";
