@@ -193,6 +193,7 @@ export function ControlBar(p: ControlBarProps) {
         <div data-testid="classic-out" data-value={p.classic?.amountOut ?? ""} className="font-mono text-[10px] text-muted">
           {p.classic ? `x·y=k would give ${formatUsd(p.classic.amountOut)}` : "x·y=k comparison"}
         </div>
+        <div className="font-mono text-[9px] text-muted-2">x·y=k pool seeded at the same TVL, balanced</div>
       </div>
 
       {/* 4 · actions */}

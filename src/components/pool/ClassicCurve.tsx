@@ -15,6 +15,12 @@ interface Props {
   classic: number[];
   /** classic reserves under the live preview; equal to `classic` when nothing is previewed */
   classicCurrent: number[];
+  /** furthest an `i -> j` trade on the committed Orbital ticks could push token i's real
+   *  reserve up — bounds the sampled range on the high side */
+  maxFwd: number;
+  /** furthest a `j -> i` trade on the committed Orbital ticks could pull token i's real
+   *  reserve down — bounds the sampled range on the low side */
+  maxBack: number;
 }
 
 /** short number, `formatUsd` shape without the currency mark */
@@ -22,18 +28,21 @@ const short = (n: number) => formatUsd(n).slice(1);
 
 /** The classic x·y=k pool for the selected pair on real-reserve axes. The curve is a
  *  property of k alone, so it never moves — only the dot slides along it. */
-export function ClassicCurve({ i, j, classic, classicCurrent }: Props) {
+export function ClassicCurve({ i, j, classic, classicCurrent, maxFwd, maxBack }: Props) {
   const k = classic[i] * classic[j];
 
-  // sampled over the interesting stretch around the committed point; the asymptote is
-  // clipped off rather than squashing the visible curve
+  // Sampled over the stretch the committed Orbital pool could actually move this pair
+  // through — a `j -> i` fill on the low side (`maxBack`), an `i -> j` fill on the high
+  // side (`maxFwd`) — rather than a fixed multiple of the committed reserve, which left
+  // the curve short of wherever a skewed pool's preview dot actually landed.
   const hyper = useMemo<[number, number][]>(() => {
-    const lo = 0.55 * classic[i], hi = 2.2 * classic[i];
+    const lo = Math.max(classic[i] - maxBack, classic[i] * 1e-3, 1e-9);
+    const hi = classic[i] + maxFwd;
     return Array.from({ length: N + 1 }, (_, s) => {
       const x = lo + ((hi - lo) * s) / N;
       return [x, k / x] as [number, number];
     });
-  }, [classic, i, k]);
+  }, [classic, i, k, maxFwd, maxBack]);
 
   const dot: [number, number] = [classicCurrent[i], classicCurrent[j]];
   const ghost: [number, number] = [classic[i], classic[j]];

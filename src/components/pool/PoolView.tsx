@@ -70,6 +70,14 @@ export function PoolView() {
     () => (ticks.length ? Math.max(Math.floor(maxFillableAuto(mode, ticks, i, j)), 1) : 1),
     [mode, ticks, i, j],
   );
+  // How far the classic-curve panel samples the hyperbola on either side of the committed
+  // point — the pair's own reverse fill, so the curve panel is the reserve slid backward as
+  // far as a `j -> i` trade on the *committed Orbital ticks* could move it. Same source
+  // (`maxFillableAuto` on `ticks`) as `maxIn` above, just the opposite direction.
+  const maxBack = useMemo(
+    () => (ticks.length ? Math.max(Math.floor(maxFillableAuto(mode, ticks, j, i)), 1) : 1),
+    [mode, ticks, i, j],
+  );
   // A Soroban-backed pool can also fail on-chain with "balance is not sufficient to spend"
   // when the connected wallet holds less than the pool could otherwise fill — the mock has no
   // real chain balance to check, so it never caps below the pool's own liquidity edge. `null`
@@ -210,7 +218,11 @@ export function PoolView() {
         <div className="relative flex min-h-0 flex-col gap-1.5 lg:pt-10">
           <PanelLabel>{tokenIn} / {tokenOut} CURVE</PanelLabel>
           {shown.length > 0 && (
-            <ClassicCurve i={i} j={j} classic={classic ?? reserves} classicCurrent={classicPreview ?? classic ?? reserves} />
+            <ClassicCurve
+              i={i} j={j}
+              classic={classic ?? reserves} classicCurrent={classicPreview ?? classic ?? reserves}
+              maxFwd={maxIn} maxBack={maxBack}
+            />
           )}
         </div>
 
