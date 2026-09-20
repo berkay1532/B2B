@@ -83,8 +83,26 @@ const CONTRACT_ERROR_MAP: Partial<Record<number, PoolErrorCode>> = {
   1: "InsufficientLiquidity",
   2: "SlippageExceeded",
   3: "ProportionMismatch",
-  // 4 InvalidAmount, 5 NotInitialized, 6 AlreadyInitialized, 7 UnknownToken have no
-  // dedicated PoolErrorCode yet — they fall through to "Unknown" with the raw message kept.
+  // 4 InvalidAmount, 5 NotInitialized, 6 AlreadyInitialized, 7 UnknownToken, 10 SAC balance
+  // error have no dedicated PoolErrorCode yet — they fall through to "Unknown", but still get
+  // a friendly message below (see FRIENDLY_ERROR_MESSAGES).
+};
+
+/**
+ * Short, user-facing text for known simulation error codes. `10` is the SAC (token contract)
+ * "balance is not sufficient to spend" error — it surfaces as `Error(Contract, #10)` from the
+ * token contract, not the pool contract, but the same `Error(Contract, #N)` shape lets us map
+ * it here too.
+ */
+const FRIENDLY_ERROR_MESSAGES: Partial<Record<number, string>> = {
+  1: "Not enough pool liquidity for this amount",
+  2: "Price moved past your slippage limit",
+  3: "Deposit amounts must match the tick's proportions",
+  4: "Invalid amount",
+  5: "Pool is not initialised",
+  6: "Pool already initialised",
+  7: "Unknown token",
+  10: "Insufficient token balance in your wallet",
 };
 
 function parseContractErrorCode(message: string): number | null {
@@ -92,10 +110,18 @@ function parseContractErrorCode(message: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/**
+ * Maps a raw simulation/RPC error (often a hundreds-of-chars `HostError: Error(Contract, #N)
+ * Event log (newest first): …` dump) to a short `PoolError` fit for the UI. The raw text is
+ * always kept, just moved to `details` instead of `message`, so callers that want it (e.g. a
+ * `title` tooltip) still can.
+ */
 function mapContractError(message: string): PoolError {
   const code = parseContractErrorCode(message);
   const mapped = code != null ? CONTRACT_ERROR_MAP[code] : undefined;
-  return new PoolError(mapped ?? "Unknown", message);
+  const friendly = code != null ? FRIENDLY_ERROR_MESSAGES[code] : undefined;
+  const display = friendly ?? `Transaction simulation failed: ${message.slice(0, 120)}`;
+  return new PoolError(mapped ?? "Unknown", display, message);
 }
 
 function tokenCodeFromAddress(address: string): TokenId {

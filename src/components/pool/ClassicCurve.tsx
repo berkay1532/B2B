@@ -15,12 +15,6 @@ interface Props {
   classic: number[];
   /** classic reserves under the live preview; equal to `classic` when nothing is previewed */
   classicCurrent: number[];
-  /** furthest an `i -> j` trade on the committed Orbital ticks could push token i's real
-   *  reserve up — bounds the sampled range on the high side */
-  maxFwd: number;
-  /** furthest a `j -> i` trade on the committed Orbital ticks could pull token i's real
-   *  reserve down — bounds the sampled range on the low side */
-  maxBack: number;
 }
 
 /** short number, `formatUsd` shape without the currency mark */
@@ -28,24 +22,29 @@ const short = (n: number) => formatUsd(n).slice(1);
 
 /** The classic x·y=k pool for the selected pair on real-reserve axes. The curve is a
  *  property of k alone, so it never moves — only the dot slides along it. */
-export function ClassicCurve({ i, j, classic, classicCurrent, maxFwd, maxBack }: Props) {
+export function ClassicCurve({ i, j, classic, classicCurrent }: Props) {
   const k = classic[i] * classic[j];
+  const dot: [number, number] = [classicCurrent[i], classicCurrent[j]];
+  const ghost: [number, number] = [classic[i], classic[j]];
 
-  // Sampled over the stretch the committed Orbital pool could actually move this pair
-  // through — a `j -> i` fill on the low side (`maxBack`), an `i -> j` fill on the high
-  // side (`maxFwd`) — rather than a fixed multiple of the committed reserve, which left
-  // the curve short of wherever a skewed pool's preview dot actually landed.
+  // Sampled over the classic pool's *own* reserves — [classic[i]/3, classic[i]*3] — rather
+  // than the Orbital committed pool's fill limits: the classic pool is seeded balanced at
+  // TVL/n, so its reserves differ from the Orbital committed reserves, and sampling out to
+  // the Orbital fill limit could start the range near the asymptote (rendering as an "L").
+  // Extended only when the live dot (or, in principle, the ghost) actually lands outside that
+  // range, so the curve stays a well-shaped arc while still always reaching the dot.
   const hyper = useMemo<[number, number][]>(() => {
-    const lo = Math.max(classic[i] - maxBack, classic[i] * 1e-3, 1e-9);
-    const hi = classic[i] + maxFwd;
+    const base = classic[i];
+    const lo = Math.max(Math.min(base / 3, dot[0], ghost[0]), base * 1e-3, 1e-9);
+    const hi = Math.max(base * 3, dot[0], ghost[0]);
     return Array.from({ length: N + 1 }, (_, s) => {
       const x = lo + ((hi - lo) * s) / N;
       return [x, k / x] as [number, number];
     });
-  }, [classic, i, k, maxFwd, maxBack]);
-
-  const dot: [number, number] = [classicCurrent[i], classicCurrent[j]];
-  const ghost: [number, number] = [classic[i], classic[j]];
+    // dot[0]/ghost[0] (not the array refs) are the real deps — `dot`/`ghost` above are new
+    // array literals every render, which would defeat the memo entirely.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classic, i, k, dot[0], ghost[0]]);
   const moved = dot[0] !== ghost[0] || dot[1] !== ghost[1];
 
   const span = (vals: number[]) => {

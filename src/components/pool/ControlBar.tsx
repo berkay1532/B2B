@@ -19,7 +19,9 @@ export interface ControlBarProps {
   landingAmounts: { depegBps: number; amountIn: number }[];
   quoteOut: number | null;
   price: number | null;
-  error: string | null;
+  /** `message` is the short user-facing caption; `details` (if present) is the raw diagnostic
+   *  text, shown only as a `title` tooltip. */
+  error: { message: string; details?: string } | null;
   busy: boolean;
   /** Phase of the swap the user last committed; drives the button label and the status line. */
   swapStatus: SwapStatus;
@@ -255,7 +257,12 @@ export function ControlBar(p: ControlBarProps) {
       </div>
 
       {p.error && (
-        <div className="font-mono text-[10px] text-boundary lg:col-span-4">{p.error}</div>
+        <div
+          className="truncate font-mono text-[10px] text-boundary lg:col-span-4"
+          title={p.error.details}
+        >
+          {p.error.message}
+        </div>
       )}
     </section>
   );

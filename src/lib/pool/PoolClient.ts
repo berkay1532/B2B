@@ -7,7 +7,12 @@ export type PoolErrorCode =
   | "NotImplemented" | "Rejected" | "Unknown";
 
 export class PoolError extends Error {
-  constructor(public code: PoolErrorCode, message?: string) {
+  /**
+   * Raw diagnostic text (e.g. a contract simulation's full `HostError: Error(Contract, #N)
+   * Event log (newest first): …` dump) kept off the user-facing `message` — the UI may still
+   * surface it, e.g. as a tooltip `title`.
+   */
+  constructor(public code: PoolErrorCode, message?: string, public details?: string) {
     super(message ?? code);
     this.name = "PoolError";
   }
