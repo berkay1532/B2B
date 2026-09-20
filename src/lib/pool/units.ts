@@ -14,3 +14,17 @@ export function formatUsd(n: number): string {
   if (abs >= 1e3) return `$${(n / 1e3).toFixed(2)}K`;
   return `$${n.toFixed(2)}`;
 }
+
+/**
+ * Full-precision grouped amount, e.g. `9,999,000.00`. `formatUsd`'s `$10.00M` is right for
+ * a headline but hides everything a demo swap actually moves, so the HUD's reserve rows use
+ * this instead and rely on `tabular-nums` to keep the columns from jittering.
+ */
+export function formatAmount(n: number): string {
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** `a1b2c3d4…9f0e` — enough of a 64-char tx hash to recognise, short enough for one line. */
+export function shortHash(hash: string): string {
+  return hash.length <= 12 ? hash : `${hash.slice(0, 8)}…${hash.slice(-4)}`;
+}

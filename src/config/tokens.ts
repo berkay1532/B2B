@@ -27,4 +27,8 @@ export const tokenIndex = (code: string): number => {
 export const NETWORK = {
   rpcUrl: process.env.NEXT_PUBLIC_RPC_URL ?? "https://soroban-testnet.stellar.org",
   networkPassphrase: "Test SDF Network ; September 2015",
+  explorerBase: "https://stellar.expert/explorer/testnet",
 };
+
+/** stellar.expert link for a submitted transaction hash. Same host the wallet panel uses. */
+export const txExplorerUrl = (hash: string): string => `${NETWORK.explorerBase}/tx/${hash}`;
