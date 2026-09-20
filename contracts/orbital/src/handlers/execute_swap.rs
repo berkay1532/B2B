@@ -26,7 +26,7 @@ pub struct SwapParams {
     pub min_amount_out: u64,
 }
 
-pub fn handler<'info>(env: Env, ctx: ExecuteSwap, params: SwapParams) -> Result<()> {
+pub fn handler<'info>(env: Env, params: SwapParams) -> Result<()> {
     let pool = read_pool(&env);
 
     let token_in = params.token_in_index as usize;

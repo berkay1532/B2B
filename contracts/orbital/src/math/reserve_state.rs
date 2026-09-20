@@ -35,7 +35,7 @@ pub struct ReserveState {
 impl ReserveState {
     /// Construct from a fixed-size reserve array and asset count.
     /// Computes running_sum and running_sq_sum in O(n).
-    pub fn new(amounts: &Vec<FixedPoint>, n: u32) -> Result<Self> {
+    pub fn new(amounts: Vec<FixedPoint>, n: u32) -> Result<Self> {
         require!(
             n >= 2 && n as usize <= MAX_ASSETS,
             crate::errors::OrbitalError::InvalidAssetCount
@@ -65,7 +65,7 @@ impl ReserveState {
     /// Bounds-checked access to a single reserve amount
     pub fn get(&self, index: u32) -> Result<FixedPoint> {
         require!(
-            index < self.n as usize,
+            index < self.n,
             crate::errors::OrbitalError::InvalidTokenIndex
         );
         Ok(self.amounts.get_unchecked(index))
@@ -126,19 +126,19 @@ impl ReserveState {
     /// Note: If a reserve is fully drained (x_i == r), the denominator is zero
     /// and this returns `DivisionByZero`. Callers should ensure reserves remain
     /// above zero before querying price, or handle the error accordingly.
-    pub fn price(&self, i: usize, j: usize, sphere: &Sphere) -> Result<FixedPoint> {
+    pub fn price(&self, i: u32, j: u32, sphere: &Sphere) -> Result<FixedPoint> {
         require!(
             self.n == sphere.n,
             crate::errors::OrbitalError::InvalidAssetCount
         );
         require!(i != j, crate::errors::OrbitalError::SameTokenSwap);
         require!(
-            i < self.n as usize && j < self.n as usize,
+            i < self.n && j < self.n,
             crate::errors::OrbitalError::InvalidTokenIndex
         );
 
         let x_i = self.amounts.get_unchecked(i);
-        let x_j = self.amounts[j];
+        let x_j = self.amounts.get_unchecked(j);
         let numerator = sphere.radius.checked_sub(x_j)?;
         let denominator = sphere.radius.checked_sub(x_i)?;
 
@@ -154,13 +154,13 @@ impl ReserveState {
     /// to prevent partial-update corruption if intermediate arithmetic fails.
     pub fn apply_trade(
         &mut self,
-        token_in: usize,
+        token_in: u32,
         amount_in: FixedPoint,
-        token_out: usize,
+        token_out: u32,
         amount_out: FixedPoint,
     ) -> Result<()> {
         require!(
-            token_in < self.n as usize && token_out < self.n as usize,
+            token_in < self.n && token_out < self.n,
             crate::errors::OrbitalError::InvalidTokenIndex
         );
         require!(
@@ -172,8 +172,8 @@ impl ReserveState {
             crate::errors::OrbitalError::NegativeTradeAmount
         );
 
-        let old_in = self.amounts[token_in];
-        let old_out = self.amounts[token_out];
+        let old_in = self.amounts.get_unchecked(token_in);
+        let old_out = self.amounts.get_unchecked(token_out);
 
         let new_in = old_in.checked_add(amount_in)?;
         let new_out = old_out.checked_sub(amount_out)?;
@@ -198,8 +198,8 @@ impl ReserveState {
             .checked_sub(old_out.squared()?)?;
 
         // Atomic assignment: all-or-nothing update
-        self.amounts[token_in] = new_in;
-        self.amounts[token_out] = new_out;
+        self.amounts.set(token_in, new_in);
+        self.amounts.set(token_out, new_out);
         self.running_sum = new_running_sum;
         self.running_sq_sum = new_running_sq_sum;
 
@@ -209,13 +209,15 @@ impl ReserveState {
 
 #[cfg(test)]
 mod tests {
+    use soroban_sdk::{vec, Env};
+
     use super::*;
 
     /// Helper: build a MAX_ASSETS array from a slice of i64 values
     fn make_amounts(vals: &[i64]) -> Vec<FixedPoint> {
-        let mut arr = [FixedPoint::zero(); MAX_ASSETS];
+        let mut arr = vec![&Env::default()];
         for (i, &v) in vals.iter().enumerate() {
-            arr.get_unchecked(i) = FixedPoint::from_int(v);
+            arr.push_back(FixedPoint::from_int(v));
         }
         arr
     }
@@ -230,7 +232,7 @@ mod tests {
     #[test]
     fn test_construction_cached_sums() {
         let amounts = make_amounts(&[100, 200, 300]);
-        let rs = ReserveState::new(&amounts, 3).unwrap();
+        let rs = ReserveState::new(amounts, 3).unwrap();
 
         // running_sum = 100 + 200 + 300 = 600
         assert_eq!(rs.running_sum, FixedPoint::from_int(600));
@@ -242,7 +244,7 @@ mod tests {
     #[test]
     fn test_active_amounts_and_get() {
         let amounts = make_amounts(&[10, 20, 30]);
-        let rs = ReserveState::new(&amounts, 3).unwrap();
+        let rs = ReserveState::new(amounts, 3).unwrap();
 
         assert_eq!(rs.active_amounts().len(), 3);
         assert_eq!(rs.get(0).unwrap(), FixedPoint::from_int(10));
@@ -257,7 +259,7 @@ mod tests {
         // n=3, all reserves = 100
         // alpha = 300 / sqrt(3) = 100*sqrt(3) ≈ 173.205
         let amounts = make_amounts(&[100, 100, 100]);
-        let rs = ReserveState::new(&amounts, 3).unwrap();
+        let rs = ReserveState::new(amounts, 3).unwrap();
         let alpha = rs.alpha().unwrap();
 
         // 100 * sqrt(3) ≈ 173.205
