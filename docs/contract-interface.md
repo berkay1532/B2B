@@ -469,3 +469,30 @@ to the smart account with the exact command below (repeated per SAC id):
 stellar contract invoke --network testnet --source orbital-issuer --id <SAC> -- \
   mint --to CBWSKKTJLKBYC2FS6PX54QI7LCWXSJWSKDZ2YE5WZZIOCFRBI4WE7BXG --amount 10000000000000
 ```
+
+## 9. Deployed pool (testnet, 2026-09-20)
+
+Reference deployment of `contracts/orbital-pool` (local branch `contract/local`):
+
+| Item | Value |
+|---|---|
+| Pool contract | `CDYPOIQFJWISFQQM2OTA2T7ZKYAS4SMIRWXSEY3HYO3WUXRZSY4TQE43` |
+| Admin / LP | `GBF7D4OLVZUPVMXZEXHCKRN7B6HFZSY4AHOUGOGGG2GIIIIOYYSI2FSE` (CLI identity `orbital-issuer`) |
+| Seed | 4 ticks at 10/100/500/1000 bps, $2.5M per token per tick, TVL $30M |
+| Verified on-chain | `quote(7M USDC→USDT)` = 6,924,145.1534166 (2 ticks crossed); `max_fillable` = 8,824,998.8876902 |
+
+Commands used (from `contracts/orbital-pool`):
+
+```bash
+stellar contract build
+stellar contract deploy --wasm ../target/wasm32v1-none/release/orbital_pool.wasm --source orbital-issuer --network testnet
+stellar contract invoke --network testnet --source orbital-issuer --id <POOL> -- init --admin <ISSUER_G> \
+  --tokens '["<USDC_SAC>","<USDT_SAC>","<USDX_SAC>"]'
+# once per tick (10, 100, 500, 1000): the issuer's SAC transfer mints, so no prior balance is needed
+stellar contract invoke --network testnet --source orbital-issuer --id <POOL> -- deposit --from <ISSUER_G> \
+  --amounts '["25000000000000","25000000000000","25000000000000"]' --depeg_bps 10
+```
+
+Frontend: `.env.local` with `NEXT_PUBLIC_POOL_BACKEND=soroban` and
+`NEXT_PUBLIC_POOL_CONTRACT_ID=<POOL>` switches `getPoolClient()` to the
+`SorobanPoolClient`. Testnet resets wipe the deployment; redo §8 and this section.
