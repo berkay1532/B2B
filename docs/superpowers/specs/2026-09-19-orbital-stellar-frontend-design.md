@@ -1,7 +1,7 @@
 # Orbital on Stellar: Frontend + Math Library Design
 
 Date: 2026-09-19
-Status: approved in chat, visual direction pending user examples
+Status: approved in chat; visual direction decided 2026-09-20 (§5.4)
 
 ## 1. Goal
 
@@ -169,7 +169,7 @@ All amounts i128 at 7 decimals. `from.require_auth()` on swap and deposit.
 ### 4.4 Tokens (`config/tokens.ts`)
 
 Three entries `{ code, contractId, decimals: 7, color }`. Mock uses
-placeholders `USDC`, `EURC`, `USDX`. Real testnet contract ids are dropped
+placeholders `USDC`, `USDT`, `USDX`. Real testnet contract ids are dropped
 in when the contract team deploys.
 
 ## 5. UI
@@ -190,9 +190,23 @@ architecture (not its visual style):
   with effective price, Commit and Reset buttons. Below: reserves table
   (reserve, price) and TVL; ticks table (depeg, cap eff, state).
 
-Quotes recompute on every input change (debounced), state updates after
-commit. In mock mode Commit is instant; in soroban mode it opens the
-wallet signer and shows the tx hash.
+**Live preview.** The amount slider (and the input) drive a preview of the
+post-swap state before Commit: the dots in the tick-planes and two-token
+panels move, the reserves/prices table and tick states update, and a grey
+ghost dot marks the committed state. Commit makes the preview the new
+committed state (the previous committed state becomes the ghost); Reset
+returns to the seed. The preview is computed locally with the pure math
+library; the numeric quote in the swap panel comes from the `PoolClient`.
+
+**Classic comparison.** The two-token panel also draws a plain `x*y=k`
+pool seeded with the same real reserves, on real-reserve axes, with its own
+dot driven by the same slider and updated on Commit. The swap panel shows
+the classic output next to the Orbital output. This makes the capital
+efficiency claim visible: the Orbital curve stays almost straight while
+the hyperbola bends.
+
+Quotes recompute on every input change (debounced). In mock mode Commit is
+instant; in soroban mode it opens the wallet signer and shows the tx hash.
 
 ### 5.2 Attack demo page (`/attack`)
 
@@ -214,13 +228,35 @@ readable price is not.
 `ConnectButton` in the header. In mock mode it still connects (so the
 address shows) but swaps do not sign. In soroban mode it signs.
 
-### 5.4 Visual direction
+### 5.4 Visual direction (decided 2026-09-20: "Observatory", Layout A)
 
-Pending. The user will bring reference examples; the visual language
-(typography, color, motion) is decided together after that. Until then
-components are built functional and unstyled beyond layout, with all
-colors and fonts routed through Tailwind theme tokens so restyling is a
-config change, not a rewrite.
+Approved mockup: `docs/design/observatory-stage-mockup.html` (also on the
+design canvas). Rules:
+
+- Palette: deep navy-black ground (`#05070d`) with a soft radial vignette
+  toward `#0d1630`, faint orbit ellipses and a few star points in the
+  background; text `#e6ebf7`, muted `#6e7a94` / `#8a96b3`, hairlines
+  `rgba(120,150,255,0.14)`. One accent, electric teal `#37f0d0`, used for
+  the reserve dot, slider, prices, CONNECT and COMMIT. Boundary state is
+  amber `#ffb454` with a glow. No purple.
+- Type: Instrument Sans (600/700) for the wordmark, big numbers and
+  inputs; JetBrains Mono for labels, tables and nav. Section labels read
+  `TICK PLANES`, `USDC / USDT CURVE`, not `// SECTION A`.
+- Layout A ("stage + control bar"): no three equal cards. Top: one wide
+  stage with the tick planes large on the left (about 600px), the curve in
+  the middle, and a small HUD (reserves/prices, ticks) bottom-right.
+  Bottom: a full-width control bar with PAY/RECEIVE token pills, the big
+  amount, a full-width slider (with amber markers where each tick lands
+  on its plane and the right stop labelled "liquidity edge"), the quote box
+  (with the "x·y=k would give …" line) and COMMIT / RESET.
+- Section 2 shows a single curve: the classic `x·y=k` pool for the
+  selected pair, with its dot sliding along it and a grey ghost at the
+  committed position. The Orbital pool is not drawn here; its comparison
+  lives in the quote box and the tick planes.
+- Motion: the reserve dot leaves a short fading trail while it moves;
+  rings pulse once when they flip to boundary; nothing else animates.
+- Attack page uses the same language (two panels on the stage, one
+  full-width budget slider below).
 
 ## 6. Error handling
 

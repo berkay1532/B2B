@@ -1,0 +1,156 @@
+"use client";
+import { useEffect, useMemo, useState } from "react";
+import { usePool } from "@/hooks/usePool";
+import { useWallet } from "@/hooks/useWallet";
+import { TOKENS, tokenIndex } from "@/config/tokens";
+import { fromUnits, toUnits, PoolError, type Quote } from "@/lib/pool";
+import { ticksFromState } from "@/lib/pool/reconstruct";
+import { capitalEfficiency, maxFillable, poolPrice, poolRealReserves, pricingTicks, quote as mathQuote, tickLandingAmounts, type Tick } from "@/lib/orbital";
+import { cpQuote, classicApply, classicSeed } from "@/lib/classic/constantProduct";
+import { TickPlanes } from "./TickPlanes";
+import { ClassicCurve } from "./ClassicCurve";
+import { ControlBar } from "./ControlBar";
+import { Hud } from "./Hud";
+
+type WithTicks = { getTicks?: () => Tick[] };
+
+function PanelLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2.5 font-mono text-[11px] tracking-[0.16em] text-muted-2">
+      <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]" />
+      {children}
+    </div>
+  );
+}
+
+export function PoolView() {
+  const { state, client } = usePool();
+  const { address } = useWallet();
+  const [tokenIn, setTokenIn] = useState(TOKENS[0].code);
+  const [tokenOut, setTokenOut] = useState(TOKENS[1].code);
+  const [amount, setAmount] = useState("");
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [quotedAmount, setQuotedAmount] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [prevTicks, setPrevTicks] = useState<Tick[] | undefined>();
+  const [classic, setClassic] = useState<number[] | null>(null);
+
+  // committed math-level ticks
+  const ticks = useMemo<Tick[]>(() => {
+    if (!state) return [];
+    const g = (client as unknown as WithTicks).getTicks;
+    return g ? g.call(client) : ticksFromState(state);
+  }, [state, client]);
+
+  // seed the classic comparison pool once from the committed real reserves
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time seed derived from the async-loaded pool state, not from props/state already in scope
+    if (classic === null && ticks.length) setClassic(classicSeed(poolRealReserves(ticks)));
+  }, [ticks, classic]);
+
+  const i = tokenIndex(tokenIn), j = tokenIndex(tokenOut);
+  // cap the slider at what the committed pool can actually fill, so a max-slider swap
+  // never round-trips an InsufficientLiquidity error from the client.
+  const maxIn = useMemo(
+    () => (ticks.length ? Math.max(Math.floor(maxFillable(ticks, i, j)), 1) : 1),
+    [ticks, i, j],
+  );
+  // amber slider markers: where each interior tick lands on its plane
+  const landingAmounts = useMemo(() => tickLandingAmounts(ticks, i, j), [ticks, i, j]);
+  const amountNum = Number(amount);
+  // synchronous, independent of the debounced client round trip — the classic row and
+  // classic dot must move instantly with the slider, same as the Orbital preview does.
+  const classicQuote = classic && amountNum > 0 ? cpQuote(classic[i], classic[j], amountNum) : null;
+  const classicPreview = classicQuote ? classicApply(classic!, i, j, amountNum) : undefined;
+
+  // live preview from the pure math library (no client round trip)
+  const previewTicks = useMemo<Tick[] | null>(() => {
+    if (!(amountNum > 0) || ticks.length === 0) return null;
+    try { return mathQuote(ticks, i, j, amountNum).ticks; } catch { return null; }
+  }, [ticks, i, j, amountNum]);
+
+  // authoritative numeric quote from the client (debounced)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing a stale debounced quote when the amount changes, not derived state
+    if (!(amountNum > 0)) { setQuote(null); setQuotedAmount(null); setError(null); return; }
+    const h = setTimeout(async () => {
+      try {
+        const q = await client.quote(tokenIn, tokenOut, toUnits(amountNum));
+        setQuote(q); setQuotedAmount(amountNum); setError(null);
+      } catch (e) { setQuote(null); setQuotedAmount(null); setError(e instanceof PoolError ? e.message : String(e)); }
+    }, 80);
+    return () => clearTimeout(h);
+  }, [amountNum, tokenIn, tokenOut, client]);
+
+  if (!state) return <div className="p-9 font-mono text-xs text-muted">loading…</div>;
+
+  const shown = previewTicks ?? ticks;                 // what every visual and table renders
+  const ghost = previewTicks ? ticks : prevTicks;      // grey dot: committed state during preview, else last committed
+  const numeraire = [0, 1, 2].find((k) => k !== i && k !== j) ?? 0;
+  const prices = shown.length ? [0, 1, 2].map((k) => poolPrice(pricingTicks(shown), k, numeraire)) : [1, 1, 1];
+  const reserves = shown.length ? poolRealReserves(shown) : state.reserves.map(fromUnits);
+  const tvl = reserves.reduce((a, b) => a + b, 0);
+  const tickRows = shown.map((t) => ({ depegBps: t.depegBps, capEff: capitalEfficiency(t.depegBps, 3), state: t.state }));
+
+  const commit = async () => {
+    if (!quote) return;
+    setBusy(true);
+    try {
+      setPrevTicks(ticks);
+      await client.swap({ from: address ?? "", tokenIn, tokenOut, amountIn: toUnits(amountNum), minOut: (quote.amountOut * 995n) / 1000n });
+      setClassic((c) => (c ? classicApply(c, i, j, amountNum) : c));
+      setAmount(""); setQuote(null); setQuotedAmount(null);
+    } catch (e) { setError(e instanceof PoolError ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+  const reset = async () => {
+    await client.reset?.();
+    setPrevTicks(undefined); setAmount(""); setClassic(null); setQuote(null); setQuotedAmount(null);
+  };
+  const flip = () => { setTokenIn(tokenOut); setTokenOut(tokenIn); };
+  const pickIn = (c: string) => { if (c === tokenOut) setTokenOut(tokenIn); setTokenIn(c); };
+  const pickOut = (c: string) => { if (c === tokenIn) setTokenIn(tokenOut); setTokenOut(c); };
+
+  return (
+    <div className="flex flex-col lg:h-[calc(100vh-60px)]">
+      <section
+        aria-label="Stage"
+        className="grid grid-cols-1 items-stretch gap-7 px-9 pt-2 lg:min-h-0 lg:flex-1 lg:grid-cols-[620px_1fr_300px]"
+      >
+        <div className="relative flex min-h-0 flex-col gap-1.5">
+          <PanelLabel>
+            TICK PLANES
+            {previewTicks && (
+              <span
+                data-testid="preview-badge"
+                className="ml-2 rounded-full border border-accent/35 px-2 py-0.5 text-[10px] tracking-[0.14em] text-accent"
+              >
+                PREVIEW
+              </span>
+            )}
+          </PanelLabel>
+          {shown.length > 0 && <TickPlanes ticks={shown} prev={ghost} previewing={!!previewTicks} />}
+        </div>
+
+        <div className="relative flex min-h-0 flex-col gap-1.5 lg:pt-10">
+          <PanelLabel>{tokenIn} / {tokenOut} CURVE</PanelLabel>
+          {shown.length > 0 && (
+            <ClassicCurve i={i} j={j} classic={classic ?? reserves} classicCurrent={classicPreview ?? classic ?? reserves} />
+          )}
+        </div>
+
+        <Hud reserves={reserves} prices={prices} tvl={tvl} ticks={tickRows} />
+      </section>
+
+      <div className="px-9 pt-4 pb-7">
+        <ControlBar
+          tokenIn={tokenIn} tokenOut={tokenOut} amount={amount} maxAmount={maxIn} landingAmounts={landingAmounts}
+          quoteOut={quote && quotedAmount === amountNum ? fromUnits(quote.amountOut) : null} price={quote?.priceAfter ?? null}
+          error={error} busy={busy}
+          classic={classicQuote ? { amountOut: classicQuote.amountOut, price: classicQuote.priceAfter } : null}
+          onTokenIn={pickIn} onTokenOut={pickOut} onAmount={setAmount} onFlip={flip} onCommit={commit} onReset={reset} />
+      </div>
+    </div>
+  );
+}
