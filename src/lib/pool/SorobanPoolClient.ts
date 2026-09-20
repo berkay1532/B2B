@@ -22,7 +22,7 @@ import {
   xMinNorm,
   type Tick,
 } from "@/lib/orbital";
-import { PoolError, type PoolClient, type PoolErrorCode, type PoolState, type Quote, type TokenId } from "./PoolClient";
+import { PoolError, type PoolClient, type PoolErrorCode, type PoolState, type Quote, type SwapArgs, type SwapPhase, type TokenId } from "./PoolClient";
 import { fromUnits } from "./units";
 
 const POLL_MS = 8000;
@@ -244,49 +244,75 @@ export class SorobanPoolClient implements PoolClient {
     }
   }
 
+  /**
+   * Build → sign → submit one contract call.
+   *
+   * The signer handle is captured once, up front: `usePoolSigner` re-runs `setSigner` on
+   * every wallet-state change, and a momentary `isConnected` blip while the passkey modal is
+   * open would otherwise null out `this.signer` between the build and the submit — throwing a
+   * TypeError over a transaction the network had already accepted.
+   *
+   * Phase reporting: Sembol's `signAndSubmit` is one call that internally does
+   * sign → re-simulate → submit and exposes no per-phase callback (its `sign` alone does not
+   * produce a submittable transaction, so splitting it is not an option). `"signing"`
+   * therefore covers that whole call, and `"submitting"` covers the read-back that follows it.
+   */
   private async invoke(
     method: string,
     args: xdr.ScVal[],
+    onStatus?: (phase: SwapPhase) => void,
   ): Promise<{ tx: AssembledTransaction<unknown>; hash: string }> {
-    if (!this.signer) throw new PoolError("Rejected", "connect a wallet first");
+    const signer = this.signer;
+    if (!signer) throw new PoolError("Rejected", "connect a wallet first");
     // `buildContractCallTransaction`'s real signature requires a non-null kit; callers that
     // rely on it (as opposed to injecting their own `buildCall`) are guaranteed one by
     // `setSigner`, which is the only way `this.signer` gets set outside of tests.
     const buildCall = this.opts.buildCall ?? (buildContractCallTransaction as BuildCallFn);
     let tx: AssembledTransaction<unknown>;
     try {
-      tx = await buildCall(this.signer.kit, { contractId: this.opts.contractId, method, args });
+      tx = await buildCall(signer.kit, { contractId: this.opts.contractId, method, args });
     } catch (e) {
       throw this.mapThrown(e);
     }
+    onStatus?.("signing");
     try {
-      const result = await this.signer.signAndSubmit(tx);
+      const result = await signer.signAndSubmit(tx);
+      onStatus?.("submitting");
       return { tx, hash: result.hash };
     } catch (e) {
       throw this.mapThrown(e);
     }
   }
 
-  async swap(args: {
-    from: string;
-    tokenIn: TokenId;
-    tokenOut: TokenId;
-    amountIn: bigint;
-    minOut: bigint;
-  }): Promise<{ amountOut: bigint; txHash?: string }> {
+  async swap(args: SwapArgs): Promise<{ amountOut: bigint; txHash?: string }> {
     if (!this.signer) throw new PoolError("Rejected", "connect a wallet first");
     const i = tokenIndex(args.tokenIn);
     const j = tokenIndex(args.tokenOut);
-    const { tx, hash } = await this.invoke("swap", [
-      new Address(args.from).toScVal(),
-      new Address(TOKENS[i].contractId).toScVal(),
-      new Address(TOKENS[j].contractId).toScVal(),
-      nativeToScVal(args.amountIn, { type: "i128" }),
-      nativeToScVal(args.minOut, { type: "i128" }),
-    ]);
+    const { tx, hash } = await this.invoke(
+      "swap",
+      [
+        new Address(args.from).toScVal(),
+        new Address(TOKENS[i].contractId).toScVal(),
+        new Address(TOKENS[j].contractId).toScVal(),
+        nativeToScVal(args.amountIn, { type: "i128" }),
+        nativeToScVal(args.minOut, { type: "i128" }),
+      ],
+      args.onStatus,
+    );
 
-    const simulated = this.decodeSimulatedResult(tx);
-    const amountOut = simulated != null ? BigInt(simulated as bigint) : (await this.quote(args.tokenIn, args.tokenOut, args.amountIn)).amountOut;
+    // The swap is already on the ledger at this point, so nothing below may reject: a failed
+    // read-back of the fill would otherwise surface as a failed swap and strand the UI.
+    // `quote()` in particular re-simulates against the *post-swap* reserves and can legally
+    // throw InsufficientLiquidity for the very amount that just went through.
+    let amountOut = 0n;
+    try {
+      const simulated = this.decodeSimulatedResult(tx);
+      amountOut = simulated != null
+        ? BigInt(simulated as bigint)
+        : (await this.quote(args.tokenIn, args.tokenOut, args.amountIn)).amountOut;
+    } catch {
+      amountOut = 0n;
+    }
     void this.pokeSubscribers();
     return { amountOut, txHash: hash };
   }

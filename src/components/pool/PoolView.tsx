@@ -1,10 +1,10 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePool } from "@/hooks/usePool";
 import { useWallet } from "@/hooks/useWallet";
 import { usePoolSigner } from "@/hooks/usePoolSigner";
 import { TOKENS, tokenIndex } from "@/config/tokens";
-import { fromUnits, toUnits, PoolError, type Quote } from "@/lib/pool";
+import { fromUnits, toUnits, PoolError, type Quote, type SwapReceipt, type SwapStatus } from "@/lib/pool";
 import { ticksFromState } from "@/lib/pool/reconstruct";
 import { capitalEfficiency, maxFillable, poolPrice, poolRealReserves, pricingTicks, quote as mathQuote, tickLandingAmounts, type Tick } from "@/lib/orbital";
 import { cpQuote, classicApply, classicSeed } from "@/lib/classic/constantProduct";
@@ -25,7 +25,7 @@ function PanelLabel({ children }: { children: React.ReactNode }) {
 }
 
 export function PoolView() {
-  const { state, client } = usePool();
+  const { state, client, refresh } = usePool();
   const { address } = useWallet();
   usePoolSigner();
   const [tokenIn, setTokenIn] = useState(TOKENS[0].code);
@@ -37,6 +37,10 @@ export function PoolView() {
   const [busy, setBusy] = useState(false);
   const [prevTicks, setPrevTicks] = useState<Tick[] | undefined>();
   const [classic, setClassic] = useState<number[] | null>(null);
+  const [swapStatus, setSwapStatus] = useState<SwapStatus>("idle");
+  const [lastTx, setLastTx] = useState<SwapReceipt | null>(null);
+  // Monotonic id for the debounced quote below: only the newest request may write state.
+  const quoteSeq = useRef(0);
 
   // committed math-level ticks
   const ticks = useMemo<Tick[]>(() => {
@@ -72,18 +76,37 @@ export function PoolView() {
     try { return mathQuote(ticks, i, j, amountNum).ticks; } catch { return null; }
   }, [ticks, i, j, amountNum]);
 
-  // authoritative numeric quote from the client (debounced)
+  // Authoritative numeric quote from the client (debounced).
+  //
+  // Every run claims a new `quoteSeq`, and a resolved request writes state only if it is
+  // still the newest. Without that, a slower earlier round trip landing after a faster later
+  // one sets `quotedAmount` back to the *old* amount, `quoteOut` goes null, and COMMIT SWAP
+  // is stuck disabled until the amount happens to change again — the reported bug. The
+  // debounce alone does not cover it: it only cancels requests that have not fired yet, and
+  // against testnet RPC two in-flight simulations routinely resolve out of order.
   useEffect(() => {
+    const seq = ++quoteSeq.current;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing a stale debounced quote when the amount changes, not derived state
     if (!(amountNum > 0)) { setQuote(null); setQuotedAmount(null); setError(null); return; }
     const h = setTimeout(async () => {
       try {
         const q = await client.quote(tokenIn, tokenOut, toUnits(amountNum));
+        if (quoteSeq.current !== seq) return;
         setQuote(q); setQuotedAmount(amountNum); setError(null);
-      } catch (e) { setQuote(null); setQuotedAmount(null); setError(e instanceof PoolError ? e.message : String(e)); }
+      } catch (e) {
+        if (quoteSeq.current !== seq) return;
+        setQuote(null); setQuotedAmount(null); setError(e instanceof PoolError ? e.message : String(e));
+      }
     }, 80);
     return () => clearTimeout(h);
   }, [amountNum, tokenIn, tokenOut, client]);
+
+  // Typing or dragging clears the aftermath of the previous swap — that's the "next action"
+  // the confirmation line waits for. `lastTx` survives: the HUD keeps showing it.
+  const onAmount = useCallback((v: string) => {
+    setAmount(v);
+    setSwapStatus((s) => (s === "confirmed" || s === "failed" ? "idle" : s));
+  }, []);
 
   if (!state) return <div className="p-9 font-mono text-xs text-muted">loading…</div>;
 
@@ -96,29 +119,50 @@ export function PoolView() {
   const tickRows = shown.map((t) => ({ depegBps: t.depegBps, capEff: capitalEfficiency(t.depegBps, 3), state: t.state }));
 
   const commit = async () => {
-    if (!quote) return;
-    setBusy(true);
+    // The button is disabled unless these hold, but a stale quote must never be committed.
+    if (!quote || quotedAmount !== amountNum) return;
+    const amountIn = amountNum;
+    setBusy(true); setError(null); setSwapStatus("signing");
     try {
       setPrevTicks(ticks);
-      await client.swap({ from: address ?? "", tokenIn, tokenOut, amountIn: toUnits(amountNum), minOut: (quote.amountOut * 995n) / 1000n });
-      setClassic((c) => (c ? classicApply(c, i, j, amountNum) : c));
+      const res = await client.swap({
+        from: address ?? "", tokenIn, tokenOut,
+        amountIn: toUnits(amountIn),
+        minOut: (quote.amountOut * 995n) / 1000n,
+        onStatus: setSwapStatus,
+      });
+      setClassic((c) => (c ? classicApply(c, i, j, amountIn) : c));
+      setLastTx({
+        hash: res.txHash,
+        amountIn,
+        // the backend may not be able to read the fill back off-chain; fall back to the quote
+        amountOut: fromUnits(res.amountOut > 0n ? res.amountOut : quote.amountOut),
+        tokenIn, tokenOut, at: Date.now(),
+      });
+      setSwapStatus("confirmed");
       setAmount(""); setQuote(null); setQuotedAmount(null);
-    } catch (e) { setError(e instanceof PoolError ? e.message : String(e)); }
+      // Pull the committed state before COMMIT can be armed again: the slider cap and the
+      // quotes both read from it, and an on-chain backend's own poll lands seconds later.
+      try { await refresh(); } catch { /* the subscription poll retries */ }
+    } catch (e) { setSwapStatus("failed"); setError(e instanceof PoolError ? e.message : String(e)); }
     finally { setBusy(false); }
   };
   const reset = async () => {
     await client.reset?.();
     setPrevTicks(undefined); setAmount(""); setClassic(null); setQuote(null); setQuotedAmount(null);
+    setSwapStatus("idle");
   };
-  const flip = () => { setTokenIn(tokenOut); setTokenOut(tokenIn); };
-  const pickIn = (c: string) => { if (c === tokenOut) setTokenOut(tokenIn); setTokenIn(c); };
-  const pickOut = (c: string) => { if (c === tokenIn) setTokenIn(tokenOut); setTokenOut(c); };
+  // changing the pair counts as the "next action" too — same rule as `onAmount`
+  const clearAftermath = () => setSwapStatus((s) => (s === "confirmed" || s === "failed" ? "idle" : s));
+  const flip = () => { clearAftermath(); setTokenIn(tokenOut); setTokenOut(tokenIn); };
+  const pickIn = (c: string) => { clearAftermath(); if (c === tokenOut) setTokenOut(tokenIn); setTokenIn(c); };
+  const pickOut = (c: string) => { clearAftermath(); if (c === tokenIn) setTokenIn(tokenOut); setTokenOut(c); };
 
   return (
     <div className="flex flex-col lg:h-[calc(100vh-60px)]">
       <section
         aria-label="Stage"
-        className="grid grid-cols-1 items-stretch gap-7 px-9 pt-2 lg:min-h-0 lg:flex-1 lg:grid-cols-[620px_1fr_300px]"
+        className="grid grid-cols-1 items-stretch gap-7 px-9 pt-2 lg:min-h-0 lg:flex-1 lg:grid-cols-[620px_1fr_320px]"
       >
         <div className="relative flex min-h-0 flex-col gap-1.5">
           <PanelLabel>
@@ -142,16 +186,16 @@ export function PoolView() {
           )}
         </div>
 
-        <Hud reserves={reserves} prices={prices} tvl={tvl} ticks={tickRows} />
+        <Hud reserves={reserves} prices={prices} tvl={tvl} ticks={tickRows} lastTx={lastTx} />
       </section>
 
       <div className="px-9 pt-4 pb-7">
         <ControlBar
           tokenIn={tokenIn} tokenOut={tokenOut} amount={amount} maxAmount={maxIn} landingAmounts={landingAmounts}
           quoteOut={quote && quotedAmount === amountNum ? fromUnits(quote.amountOut) : null} price={quote?.priceAfter ?? null}
-          error={error} busy={busy}
+          error={error} busy={busy} swapStatus={swapStatus} lastTx={lastTx}
           classic={classicQuote ? { amountOut: classicQuote.amountOut, price: classicQuote.priceAfter } : null}
-          onTokenIn={pickIn} onTokenOut={pickOut} onAmount={setAmount} onFlip={flip} onCommit={commit} onReset={reset} />
+          onTokenIn={pickIn} onTokenOut={pickOut} onAmount={onAmount} onFlip={flip} onCommit={commit} onReset={reset} />
       </div>
     </div>
   );
