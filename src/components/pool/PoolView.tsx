@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePool } from "@/hooks/usePool";
 import { useWallet } from "@/hooks/useWallet";
+import { usePoolSigner } from "@/hooks/usePoolSigner";
 import { TOKENS, tokenIndex } from "@/config/tokens";
 import { fromUnits, toUnits, PoolError, type Quote } from "@/lib/pool";
 import { ticksFromState } from "@/lib/pool/reconstruct";
@@ -26,6 +27,7 @@ function PanelLabel({ children }: { children: React.ReactNode }) {
 export function PoolView() {
   const { state, client } = usePool();
   const { address } = useWallet();
+  usePoolSigner();
   const [tokenIn, setTokenIn] = useState(TOKENS[0].code);
   const [tokenOut, setTokenOut] = useState(TOKENS[1].code);
   const [amount, setAmount] = useState("");

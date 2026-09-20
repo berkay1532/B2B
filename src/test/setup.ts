@@ -29,6 +29,12 @@ vi.mock("@sembol/passkey-react", () => ({
   useWalletBalance: () => {
     throw new Error("Sembol hooks and components must be used inside <PasskeyWalletProvider />.");
   },
+  useSignTransaction: () => {
+    throw new Error("Sembol hooks and components must be used inside <PasskeyWalletProvider />.");
+  },
+  buildContractCallTransaction: () => {
+    throw new Error("buildContractCallTransaction requires a real SmartAccountKit; inject `buildCall` in tests instead.");
+  },
   explorerUrl: () => null,
   truncateAddress: (address: string, start = 4, end = 4) => `${address.slice(0, start)}…${address.slice(-end)}`,
   SEMBOL_TESTNET_ARTIFACTS: {
