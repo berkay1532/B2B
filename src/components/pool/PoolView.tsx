@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePool } from "@/hooks/usePool";
 import { useWallet } from "@/hooks/useWallet";
 import { usePoolSigner } from "@/hooks/usePoolSigner";
+import { useTokenBalances } from "@/hooks/useTokenBalances";
 import { TOKENS, tokenIndex } from "@/config/tokens";
 import { fromUnits, toUnits, PoolError, type Quote, type SwapReceipt, type SwapStatus } from "@/lib/pool";
 import { ticksFromState } from "@/lib/pool/reconstruct";
@@ -28,6 +29,10 @@ export function PoolView() {
   const { state, client, refresh } = usePool();
   const { address } = useWallet();
   usePoolSigner();
+  // On-chain balances for the connected address, read independently of pair selection — the
+  // hook fetches every pool token in parallel. `null` per-token until a read resolves (or the
+  // wallet disconnects), which the wallet cap below treats as "unknown, don't cap yet".
+  const { balances: walletBalances, refresh: refreshWalletBalances } = useTokenBalances(address);
   const [tokenIn, setTokenIn] = useState(TOKENS[0].code);
   const [tokenOut, setTokenOut] = useState(TOKENS[1].code);
   const [amount, setAmount] = useState("");
@@ -65,6 +70,15 @@ export function PoolView() {
     () => (ticks.length ? Math.max(Math.floor(maxFillableAuto(mode, ticks, i, j)), 1) : 1),
     [mode, ticks, i, j],
   );
+  // A Soroban-backed pool can also fail on-chain with "balance is not sufficient to spend"
+  // when the connected wallet holds less than the pool could otherwise fill — the mock has no
+  // real chain balance to check, so it never caps below the pool's own liquidity edge. `null`
+  // here (no wallet, mock client, or the balance hasn't resolved yet) means "don't cap".
+  const isOnChainClient = client.kind === "soroban";
+  const walletBalanceRaw = isOnChainClient && address ? walletBalances[tokenIn] : null;
+  const walletMax = walletBalanceRaw != null ? fromUnits(walletBalanceRaw) : null;
+  const sliderMax = walletMax != null ? Math.max(1, Math.floor(Math.min(maxIn, walletMax))) : maxIn;
+  const walletCapped = walletMax != null && walletMax < maxIn;
   // amber slider markers: where each interior tick lands on its plane
   const landingAmounts = useMemo(() => tickLandingAmountsAuto(mode, ticks, i, j), [mode, ticks, i, j]);
   const amountNum = Number(amount);
@@ -155,6 +169,9 @@ export function PoolView() {
       // Pull the committed state before COMMIT can be armed again: the slider cap and the
       // quotes both read from it, and an on-chain backend's own poll lands seconds later.
       try { await refresh(); } catch { /* the subscription poll retries */ }
+      // The wallet's balance just moved too — refresh it so the wallet cap (and the
+      // insufficient-balance check) reflect what's actually left to spend.
+      refreshWalletBalances();
     } catch (e) { setSwapStatus("failed"); setError(e instanceof PoolError ? e.message : String(e)); }
     finally { setBusy(false); }
   };
@@ -202,7 +219,8 @@ export function PoolView() {
 
       <div className="px-9 pt-4 pb-7">
         <ControlBar
-          tokenIn={tokenIn} tokenOut={tokenOut} amount={amount} maxAmount={maxIn} landingAmounts={landingAmounts}
+          tokenIn={tokenIn} tokenOut={tokenOut} amount={amount} maxAmount={sliderMax} walletMax={walletMax}
+          walletCapped={walletCapped} landingAmounts={landingAmounts}
           quoteOut={quote && quotedAmount === amountNum ? fromUnits(quote.amountOut) : null} price={quote?.priceAfter ?? null}
           error={error} busy={busy} swapStatus={swapStatus} lastTx={lastTx}
           classic={classicQuote ? { amountOut: classicQuote.amountOut, price: classicQuote.priceAfter } : null}

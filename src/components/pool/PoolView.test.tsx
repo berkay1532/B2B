@@ -18,6 +18,7 @@ const HASH = "7f3a91c2d4e5b6a708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f";
 class SlowSwapClient implements PoolClient {
   private readonly inner = new MockPoolClient();
   readonly mode = this.inner.mode;
+  readonly kind = this.inner.kind;
   getState(): Promise<PoolState> { return this.inner.getState(); }
   getTicks() { return this.inner.getTicks(); }
   quote(a: TokenId, b: TokenId, amountIn: bigint): Promise<Quote> { return this.inner.quote(a, b, amountIn); }
@@ -36,6 +37,7 @@ class SlowSwapClient implements PoolClient {
 class GatedQuoteClient implements PoolClient {
   private readonly inner = new MockPoolClient();
   readonly mode = this.inner.mode;
+  readonly kind = this.inner.kind;
   readonly pending: (() => void)[] = [];
   getState(): Promise<PoolState> { return this.inner.getState(); }
   getTicks() { return this.inner.getTicks(); }

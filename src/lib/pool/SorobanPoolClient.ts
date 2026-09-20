@@ -126,6 +126,7 @@ function tickToMath(raw: RawTickData, n: number): Tick {
 export class SorobanPoolClient implements PoolClient {
   /** The deployed contract implements v1; it never dispatches on the env flag. */
   readonly mode = "v1" as const;
+  readonly kind = "soroban" as const;
   private signer: SignerHandle | null = null;
   /** Math-level ticks from the last `getState()`, backing `getTicks()` and quote pricing. */
   private cachedTicks: Tick[] = [];

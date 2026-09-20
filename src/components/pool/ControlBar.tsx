@@ -1,12 +1,20 @@
 "use client";
 import { TOKENS, txExplorerUrl } from "@/config/tokens";
-import { formatUsd, shortHash, type SwapReceipt, type SwapStatus } from "@/lib/pool";
+import { formatAmount, formatUsd, shortHash, type SwapReceipt, type SwapStatus } from "@/lib/pool";
 
 export interface ControlBarProps {
   tokenIn: string;
   tokenOut: string;
   amount: string;
+  /** slider's actual cap — the pool's liquidity edge, or the connected wallet's on-chain
+   *  balance for `tokenIn` if that's lower (see `walletCapped`). */
   maxAmount: number;
+  /** connected wallet's on-chain `tokenIn` balance, display units. `null` when there's no
+   *  wallet to cap against (mock client, disconnected, or the balance hasn't loaded yet) —
+   *  in that case `maxAmount` is purely the pool's liquidity edge. */
+  walletMax: number | null;
+  /** true when `maxAmount` came from `walletMax` rather than the pool's own liquidity edge. */
+  walletCapped: boolean;
   /** input amounts at which a tick lands on its plane — the amber slider markers */
   landingAmounts: { depegBps: number; amountIn: number }[];
   quoteOut: number | null;
@@ -83,6 +91,11 @@ export function ControlBar(p: ControlBarProps) {
     .map((l) => ({ depegBps: l.depegBps, at: l.amountIn / (p.maxAmount || 1) }))
     .filter((m) => m.at > 0 && m.at <= 1);
   const busyLabel = BUSY_LABEL[p.swapStatus] ?? "SIGNING…";
+  // The typed amount isn't clamped by the slider (only dragging is), so it can still exceed
+  // the wallet's actual balance — that's exactly the case that used to reach the chain and
+  // fail at signing with "balance is not sufficient to spend". Block it here instead.
+  const insufficientBalance = p.walletMax != null && amountNum > p.walletMax;
+  const commitDisabled = p.busy || p.quoteOut === null || insufficientBalance;
 
   return (
     <section
@@ -121,7 +134,7 @@ export function ControlBar(p: ControlBarProps) {
             <span className="font-mono text-[11px] text-muted-2">{p.tokenIn}</span>
           </label>
           <span className="shrink-0 font-mono text-[10px] text-muted">
-            max {grouped(String(p.maxAmount))} · liquidity edge
+            max {grouped(String(p.maxAmount))} · {p.walletCapped ? "wallet balance" : "liquidity edge"}
           </span>
         </div>
 
@@ -186,7 +199,7 @@ export function ControlBar(p: ControlBarProps) {
       <div className="flex flex-col gap-2">
         <button
           type="button"
-          disabled={p.busy || p.quoteOut === null}
+          disabled={commitDisabled}
           onClick={p.onCommit}
           className="h-[46px] rounded-xl bg-accent font-mono text-xs font-medium tracking-[0.16em] text-bg shadow-[0_0_24px_color-mix(in_srgb,var(--accent)_35%,transparent)] disabled:opacity-40 disabled:shadow-none"
         >
@@ -211,7 +224,11 @@ export function ControlBar(p: ControlBarProps) {
             de-emphasised by a pure-CSS fade at ~6s — no timer, so tests stay deterministic.
             The slot is always present so the bar doesn't jump when the line appears. */}
         <div className="min-h-[14px]">
-          {p.swapStatus === "confirmed" && (
+          {insufficientBalance ? (
+            <div data-testid="insufficient-balance" className="truncate font-mono text-[10px] text-boundary">
+              insufficient {p.tokenIn} balance ({formatAmount(p.walletMax as number)})
+            </div>
+          ) : p.swapStatus === "confirmed" && (
             <div
               data-testid="swap-status"
               className="orbital-fade-late truncate font-mono text-[10px] text-accent"

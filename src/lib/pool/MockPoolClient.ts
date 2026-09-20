@@ -24,6 +24,7 @@ export class MockPoolClient implements PoolClient {
   private readonly n = TOKENS.length;
   private readonly opts: Required<MockOptions>;
   readonly mode: OrbitalMode;
+  readonly kind = "mock" as const;
 
   constructor(opts: MockOptions = {}) {
     this.opts = {
