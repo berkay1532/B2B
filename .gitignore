@@ -46,3 +46,4 @@ next-env.d.ts
 
 # rust / soroban contracts
 contracts/target/
+contracts/**/test_snapshots/
