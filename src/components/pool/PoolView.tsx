@@ -58,12 +58,15 @@ export function PoolView() {
   const i = tokenIndex(tokenIn), j = tokenIndex(tokenOut);
   // cap the slider at what the committed pool can actually fill, so a max-slider swap
   // never round-trips an InsufficientLiquidity error from the client.
+  // the math has to match whatever backs this pool, not a global env flag:
+  // a Soroban-backed pool is v1 even when the mock default says v2.
+  const mode = client.mode;
   const maxIn = useMemo(
-    () => (ticks.length ? Math.max(Math.floor(maxFillableAuto(ticks, i, j)), 1) : 1),
-    [ticks, i, j],
+    () => (ticks.length ? Math.max(Math.floor(maxFillableAuto(mode, ticks, i, j)), 1) : 1),
+    [mode, ticks, i, j],
   );
   // amber slider markers: where each interior tick lands on its plane
-  const landingAmounts = useMemo(() => tickLandingAmountsAuto(ticks, i, j), [ticks, i, j]);
+  const landingAmounts = useMemo(() => tickLandingAmountsAuto(mode, ticks, i, j), [mode, ticks, i, j]);
   const amountNum = Number(amount);
   // synchronous, independent of the debounced client round trip — the classic row and
   // classic dot must move instantly with the slider, same as the Orbital preview does.
@@ -73,8 +76,8 @@ export function PoolView() {
   // live preview from the pure math library (no client round trip)
   const previewTicks = useMemo<Tick[] | null>(() => {
     if (!(amountNum > 0) || ticks.length === 0) return null;
-    try { return mathQuote(ticks, i, j, amountNum).ticks; } catch { return null; }
-  }, [ticks, i, j, amountNum]);
+    try { return mathQuote(mode, ticks, i, j, amountNum).ticks; } catch { return null; }
+  }, [mode, ticks, i, j, amountNum]);
 
   // Authoritative numeric quote from the client (debounced).
   //

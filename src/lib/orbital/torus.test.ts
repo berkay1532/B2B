@@ -4,6 +4,7 @@ import { invariantResidual, planeSum, sumX } from "./tick";
 import { maxFillable, quote } from "./swap";
 import {
   consolidate,
+  MAX_ENTRY_RESIDUAL,
   maxFillableV2,
   quoteV2,
   ringFraction,
@@ -32,6 +33,33 @@ describe("quoteV2 — argument handling", () => {
     expect(() => quoteV2(seed(), 0, 0, 1)).toThrow(OrbitalError);
     expect(() => quoteV2(seed(), 0, 1, 0)).toThrow(OrbitalError);
     expect(() => quoteV2(seed(), 0, 5, 1000)).toThrow(OrbitalError);
+  });
+
+  it("rejects a state that is not on the torus (e.g. one produced by v1)", () => {
+    // v1 freezes a boundary tick where v2 would have carried it along its
+    // circle, so a v1 post-swap state sits off the consolidated surface.
+    const v1State = quote(seed(), 0, 1, 7_000_000).ticks;
+    expect(v1State.some((t) => t.state === "boundary")).toBe(true);
+    const residual = torusResidual(consolidate(v1State));
+    expect(residual).toBeGreaterThan(MAX_ENTRY_RESIDUAL);
+
+    expect(() => quoteV2(v1State, 0, 1, 1)).toThrow(
+      expect.objectContaining({ code: "InvalidTick" }),
+    );
+    // ... and without the guard that gap is quietly paid out as output
+    expect(() => quoteV2(v1State, 0, 1, 1)).toThrow(/not on the torus/);
+  });
+
+  it("accepts every state its own quotes produce, with room to spare", () => {
+    let ticks = seed();
+    let worst = 0;
+    for (const [i, j, a] of [[0, 1, 3e6], [1, 2, 2e6], [2, 0, 1e6], [0, 1, 4e6]] as const) {
+      const q = quoteV2(ticks, i, j, a);
+      worst = Math.max(worst, torusResidual(consolidate(q.ticks)));
+      ticks = q.ticks;
+    }
+    // the entry threshold is not a hair's breadth above what v2 itself emits
+    expect(worst).toBeLessThan(MAX_ENTRY_RESIDUAL / 10);
   });
 
   it("does not mutate the input ticks", () => {
@@ -73,13 +101,20 @@ describe("(b) the torus invariant holds after every segment", () => {
   it("residual stays under 1e-9 across the whole fillable range", () => {
     // these amounts straddle each tick landing, so the quote runs 1..4 segments
     for (const amountIn of [1e3, 1e6, 2.4e6, 2.5e6, 4.9e6, 5.1e6, 7e6, 7.7e6, 8.8e6]) {
-      const q = quoteV2(seed(), 0, 1, amountIn);
+      const before = seed();
+      const X0 = totalX(before);
+      const q = quoteV2(before, 0, 1, amountIn);
       expect(torusResidual(consolidate(q.ticks))).toBeLessThan(1e-9);
       expectTicksOnTheirSurfaces(q.ticks);
-      // the reconstruction reproduces the consolidated totals exactly
-      const c = consolidate(q.ticks);
-      const S = totalX(q.ticks);
-      c.X.forEach((v, m) => expect(Math.abs(v - S[m])).toBeLessThan(1e-6));
+
+      // conservation: the pool's totals moved by exactly the traded amounts and
+      // nothing else. X1 is recomputed from the returned ticks, so this also
+      // pins the per-tick reconstruction to the consolidated solve.
+      const X1 = totalX(q.ticks);
+      expect(Math.abs(X1[0] - (X0[0] + amountIn)) / (X0[0] + amountIn)).toBeLessThan(1e-9);
+      expect(Math.abs(X1[1] - (X0[1] - q.amountOut)) / X0[1]).toBeLessThan(1e-9);
+      // the untraded token never moves
+      expect(Math.abs(X1[2] - X0[2]) / X0[2]).toBeLessThan(1e-12);
     }
   });
 });
@@ -116,7 +151,9 @@ describe("(e) on a large swap v2 beats v1 by a little", () => {
   it("7M: v2 out >= v1 out and the gap is under 1%", () => {
     const v1 = quote(seed(), 0, 1, 7_000_000);
     const v2 = quoteV2(seed(), 0, 1, 7_000_000);
-    expect(v2.amountOut).toBeGreaterThanOrEqual(v1.amountOut);
+    // 1e-9 relative slack: on trades where the two agree analytically the gap is
+    // pure float noise (up to ~3e-11 measured) and can land either side of zero.
+    expect(v2.amountOut).toBeGreaterThanOrEqual(v1.amountOut * (1 - 1e-9));
     expect((v2.amountOut - v1.amountOut) / v1.amountOut).toBeLessThan(0.01);
     expect(v2.ticksCrossed).toBe(v1.ticksCrossed);
   });

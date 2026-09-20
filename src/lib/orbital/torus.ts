@@ -54,6 +54,17 @@ export const planeHeightNorm = (t: Tick): number => Math.sqrt(t.x.length) - t.ka
 /** `σ_k = ρ_k/R_k = √(1 − b_k²)` — the tick's ring radius, normalized by its radius. */
 export const ringFraction = (t: Tick): number => ringRadiusNorm(t.kappa, t.x.length);
 
+/**
+ * Largest torus residual a caller-supplied state may carry. States produced by
+ * `quoteV2` stay under ~1e-13 relative; a v1 state (where boundary ticks were
+ * frozen rather than moved along their circles) is orders of magnitude worse,
+ * and silently absorbing that into the first segment would invent output.
+ */
+export const MAX_ENTRY_RESIDUAL = 1e-12;
+
+const isNoConvergence = (e: unknown): boolean =>
+  e instanceof OrbitalError && e.code === "NoConvergence";
+
 /** A tick is at its boundary once its own perpendicular extent reaches `σ_k`. */
 export function isBoundaryState(t: Tick): boolean {
   const K = planeSum(t);
@@ -315,7 +326,9 @@ export function crossingDelta(g: Segment, cap: number, sigmaTarget: number, risi
   for (let k = 0; k < BISECT_ROUNDS; k++) {
     const mid = 0.5 * (lo + hi);
     let sm: number;
-    try { sm = sAt(g, mid); } catch { hi = mid; continue; }
+    // only "δ is too big for the torus" narrows the bracket; a solver that
+    // failed to converge is a bug, not a signal, so let it out.
+    try { sm = sAt(g, mid); } catch (e) { if (isNoConvergence(e)) throw e; hi = mid; continue; }
     const past = rising ? sm >= sigmaTarget : sm <= sigmaTarget;
     if (past) hi = mid; else lo = mid;
   }
@@ -326,14 +339,14 @@ export function crossingDelta(g: Segment, cap: number, sigmaTarget: number, risi
 function turningDelta(g: Segment, cap: number): number | null {
   const h = (d: number): number => g.c.X[g.i] + d - solveOut(g, d);
   let hCap: number;
-  try { hCap = h(cap); } catch { return null; }
+  try { hCap = h(cap); } catch (e) { if (isNoConvergence(e)) throw e; return null; }
   if (!(hCap > 0)) return null;
   if (h(0) >= 0) return null;
   let lo = 0, hi = cap;
   for (let k = 0; k < BISECT_ROUNDS; k++) {
     const mid = 0.5 * (lo + hi);
     let hm: number;
-    try { hm = h(mid); } catch { hi = mid; continue; }
+    try { hm = h(mid); } catch (e) { if (isNoConvergence(e)) throw e; hi = mid; continue; }
     if (hm >= 0) hi = mid; else lo = mid;
   }
   return hi;
@@ -424,6 +437,17 @@ export function quoteV2(ticks: Tick[], tokenIn: number, tokenOut: number, amount
   for (const t of work) t.state = isBoundaryState(t) ? "boundary" : "interior";
 
   const X = totalX(work);
+  // The incoming state must already be on the torus. A v1 state is not: v1
+  // freezes a boundary tick outright, so its ticks are off the consolidated
+  // surface and the first segment would quietly swallow the gap as output
+  // (measured on a v1 post-swap state: 2.32 out for 1 in, once).
+  const entry = torusResidual(consolidate(work, X));
+  if (!(entry <= MAX_ENTRY_RESIDUAL)) {
+    throw new OrbitalError(
+      "InvalidTick",
+      `state is not on the torus (residual ${entry.toExponential(2)} > ${MAX_ENTRY_RESIDUAL.toExponential(0)})`,
+    );
+  }
   // v1 parity: settle the classification for this direction before pricing.
   reclassify(work, X, X[i] < X[j]);
   const priceBefore = poolPrice(pricingTicks(work), j, i);

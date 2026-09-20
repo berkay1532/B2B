@@ -1,3 +1,7 @@
+// The attack page builds its own standalone comparison pool and deliberately
+// stays on v1 (`quote`/`maxFillable`, not the `Auto` helpers): it is a fixed
+// illustration whose published numbers should not move with
+// `NEXT_PUBLIC_ORBITAL_MODE`, and it has no `PoolClient` to take a mode from.
 import { createTick, maxFillable, quote, OrbitalError, type Tick } from "@/lib/orbital";
 
 export interface Ask { price: number; size: number }

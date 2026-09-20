@@ -1,3 +1,5 @@
+import type { OrbitalMode } from "@/lib/orbital";
+
 export type TokenId = string; // token code from config
 
 export type PoolErrorCode =
@@ -64,6 +66,12 @@ export interface SwapArgs {
 }
 
 export interface PoolClient {
+  /**
+   * Which Orbital math backs this pool. The UI must read it from here rather
+   * than from the environment: a Soroban-backed pool is always `v1` (that is
+   * what the contract implements) even when the mock default says otherwise.
+   */
+  readonly mode: OrbitalMode;
   getState(): Promise<PoolState>;
   quote(tokenIn: TokenId, tokenOut: TokenId, amountIn: bigint): Promise<Quote>;
   swap(args: SwapArgs): Promise<{ amountOut: bigint; txHash?: string }>;

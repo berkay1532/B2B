@@ -613,10 +613,35 @@ y_hi = X_j                                          F(y_hi) <  0
 ```
 
 Seed with the v1 closed form on the consolidated interior sphere, then at most
-32 Newton steps, tolerance 1e-9 relative; a step that leaves the bracket falls
-back to bisection, and the bracket is tightened from the sign of `F` at every
-iterate. No bracket => `InsufficientLiquidity`; no convergence in 32 =>
-`NoConvergence`.
+32 Newton steps. A step that leaves the bracket falls back to bisection, and
+the bracket is tightened from the sign of `F` at every iterate (`F > 0` raises
+`y_lo`, `F <= 0` lowers `y_hi`). The exact accept/reject constants a port must
+copy:
+
+```
+accept when |F(y)| <= 1e-16 * R_int^2            // residual at the float64 noise floor
+accept when |y_next - y| <= 1e-15 * max(|y|, 1)  // the Newton step has stopped moving
+after 32 iterations:
+  accept when (y_hi - y_lo) <= 1e-9 * max(|y|, 1)   // bracket-width fallback ONLY
+  else -> NoConvergence
+no bracket at all -> InsufficientLiquidity
+```
+
+The 1e-9 figure is *only* the last-resort bracket-width check; in practice
+Newton hits the 1e-16 residual test in under 8 iterations. The two bisection
+searches above this solve (`crossingDelta` for `s(delta) = sigma_k`, and the
+turning point where `X_i = X_j`) run 60 rounds each and narrow their bracket
+only on `InsufficientLiquidity` — a `NoConvergence` from the inner solve is
+re-thrown, being a solver bug rather than a signal that `delta` was too large.
+
+**Entry guard.** `quoteV2` rejects a state that is not already on the torus:
+after deriving membership it requires `torusResidual <= 1e-12` relative
+(`MAX_ENTRY_RESIDUAL`), and otherwise throws `InvalidTick`. This matters
+because a **v1** state is not on the torus — v1 freezes a boundary tick where
+v2 would have carried it along its circle — and without the guard the first
+segment silently pays that gap out as output (measured on a v1 post-swap
+state: 2.32 out for 1 in, once). States produced by `quoteV2` itself stay
+below 1e-13, so the threshold keeps an order of magnitude of headroom.
 
 **Segmentation.** `s` is *not* monotone along a trade: it falls while the pool
 moves toward the equal point and rises after. The turning point is exactly

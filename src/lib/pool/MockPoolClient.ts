@@ -1,9 +1,14 @@
 import { TOKENS, tokenIndex } from "@/config/tokens";
-import { capitalEfficiency, createTick, cloneTick, OrbitalError, poolRealReserves, quoteAuto as mathQuote, realReserves, type Tick } from "@/lib/orbital";
+import { capitalEfficiency, createTick, cloneTick, ORBITAL_MODE, OrbitalError, poolRealReserves, quoteAuto as mathQuote, realReserves, type OrbitalMode, type Tick } from "@/lib/orbital";
 import { PoolError, type PoolClient, type PoolState, type Quote, type SwapArgs, type TokenId } from "./PoolClient";
 import { fromUnits, toUnits } from "./units";
 
-export interface MockOptions { realPerTokenPerTick?: number; depegBpsList?: number[] }
+export interface MockOptions {
+  realPerTokenPerTick?: number;
+  depegBpsList?: number[];
+  /** Defaults to `ORBITAL_MODE` (i.e. `NEXT_PUBLIC_ORBITAL_MODE`). */
+  mode?: OrbitalMode;
+}
 
 function mapError(e: unknown): PoolError {
   if (e instanceof OrbitalError) {
@@ -18,9 +23,15 @@ export class MockPoolClient implements PoolClient {
   private listeners = new Set<(s: PoolState) => void>();
   private readonly n = TOKENS.length;
   private readonly opts: Required<MockOptions>;
+  readonly mode: OrbitalMode;
 
   constructor(opts: MockOptions = {}) {
-    this.opts = { realPerTokenPerTick: opts.realPerTokenPerTick ?? 2_500_000, depegBpsList: opts.depegBpsList ?? [10, 100, 500, 1000] };
+    this.opts = {
+      realPerTokenPerTick: opts.realPerTokenPerTick ?? 2_500_000,
+      depegBpsList: opts.depegBpsList ?? [10, 100, 500, 1000],
+      mode: opts.mode ?? ORBITAL_MODE,
+    };
+    this.mode = this.opts.mode;
     this.seed();
   }
 
@@ -44,7 +55,7 @@ export class MockPoolClient implements PoolClient {
 
   async quote(tokenIn: TokenId, tokenOut: TokenId, amountIn: bigint): Promise<Quote> {
     try {
-      const q = mathQuote(this.ticks, tokenIndex(tokenIn), tokenIndex(tokenOut), fromUnits(amountIn));
+      const q = mathQuote(this.mode, this.ticks, tokenIndex(tokenIn), tokenIndex(tokenOut), fromUnits(amountIn));
       return { amountOut: toUnits(q.amountOut), ticksCrossed: q.ticksCrossed, priceBefore: q.priceBefore, priceAfter: q.priceAfter };
     } catch (e) { throw mapError(e); }
   }
@@ -55,7 +66,7 @@ export class MockPoolClient implements PoolClient {
     args.onStatus?.("signing");
     args.onStatus?.("submitting");
     let q;
-    try { q = mathQuote(this.ticks, tokenIndex(args.tokenIn), tokenIndex(args.tokenOut), fromUnits(args.amountIn)); }
+    try { q = mathQuote(this.mode, this.ticks, tokenIndex(args.tokenIn), tokenIndex(args.tokenOut), fromUnits(args.amountIn)); }
     catch (e) { throw mapError(e); }
     const amountOut = toUnits(q.amountOut);
     if (amountOut < args.minOut) throw new PoolError("SlippageExceeded", `out ${amountOut} < minOut ${args.minOut}`);
