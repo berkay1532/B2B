@@ -124,6 +124,8 @@ function tickToMath(raw: RawTickData, n: number): Tick {
  * need a connected wallet: call {@link setSigner} (done by `usePoolSigner`) before invoking them.
  */
 export class SorobanPoolClient implements PoolClient {
+  /** The deployed contract implements v1; it never dispatches on the env flag. */
+  readonly mode = "v1" as const;
   private signer: SignerHandle | null = null;
   /** Math-level ticks from the last `getState()`, backing `getTicks()` and quote pricing. */
   private cachedTicks: Tick[] = [];

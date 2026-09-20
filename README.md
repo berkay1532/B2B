@@ -40,6 +40,7 @@ Copy `.env.example` to `.env.local`:
 | `NEXT_PUBLIC_POOL_BACKEND` | `mock` (default) or `soroban`. Picks the `PoolClient` implementation. |
 | `NEXT_PUBLIC_RPC_URL` | Soroban RPC endpoint, only used when `soroban`. Defaults to `https://soroban-testnet.stellar.org`. |
 | `NEXT_PUBLIC_POOL_CONTRACT_ID` | Deployed pool contract id, only used when `soroban`. |
+| `NEXT_PUBLIC_ORBITAL_MODE` | `v1` (default) or `v2` (the paper's torus consolidation, `docs/contract-interface.md` §10). Mock pool only — the deployed contract is v1, so a `soroban` backend stays on v1 regardless. |
 
 Wallet connection uses `@sembol/passkey-react` against testnet: connecting
 creates or restores a Sembol **passkey smart wallet** (an OpenZeppelin smart

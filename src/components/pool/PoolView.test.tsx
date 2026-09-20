@@ -17,6 +17,7 @@ const HASH = "7f3a91c2d4e5b6a708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f";
 /** Mock pool with a deliberately slow, hash-returning `swap` — stands in for the wallet. */
 class SlowSwapClient implements PoolClient {
   private readonly inner = new MockPoolClient();
+  readonly mode = this.inner.mode;
   getState(): Promise<PoolState> { return this.inner.getState(); }
   getTicks() { return this.inner.getTicks(); }
   quote(a: TokenId, b: TokenId, amountIn: bigint): Promise<Quote> { return this.inner.quote(a, b, amountIn); }
@@ -34,6 +35,7 @@ class SlowSwapClient implements PoolClient {
 /** Mock pool whose `quote` parks until the test releases it, newest-first if it wants. */
 class GatedQuoteClient implements PoolClient {
   private readonly inner = new MockPoolClient();
+  readonly mode = this.inner.mode;
   readonly pending: (() => void)[] = [];
   getState(): Promise<PoolState> { return this.inner.getState(); }
   getTicks() { return this.inner.getTicks(); }
