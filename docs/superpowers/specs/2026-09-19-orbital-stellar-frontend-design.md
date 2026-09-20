@@ -169,7 +169,7 @@ All amounts i128 at 7 decimals. `from.require_auth()` on swap and deposit.
 ### 4.4 Tokens (`config/tokens.ts`)
 
 Three entries `{ code, contractId, decimals: 7, color }`. Mock uses
-placeholders `USDC`, `EURC`, `USDX`. Real testnet contract ids are dropped
+placeholders `USDC`, `USDT`, `USDX`. Real testnet contract ids are dropped
 in when the contract team deploys.
 
 ## 5. UI
@@ -241,7 +241,7 @@ design canvas). Rules:
   amber `#ffb454` with a glow. No purple.
 - Type: Instrument Sans (600/700) for the wordmark, big numbers and
   inputs; JetBrains Mono for labels, tables and nav. Section labels read
-  `TICK PLANES`, `USDC / EURC CURVE`, not `// SECTION A`.
+  `TICK PLANES`, `USDC / USDT CURVE`, not `// SECTION A`.
 - Layout A ("stage + control bar"): no three equal cards. Top: one wide
   stage with the tick planes large on the left (about 600px), the curve in
   the middle, and a small HUD (reserves/prices, ticks) bottom-right.

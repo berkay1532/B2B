@@ -16,13 +16,13 @@ describe("MockPoolClient", () => {
   });
   it("quote does not change state, swap does and notifies", async () => {
     const c = new MockPoolClient();
-    const q = await c.quote("USDC", "EURC", toUnits(1_000_000));
+    const q = await c.quote("USDC", "USDT", toUnits(1_000_000));
     expect(fromUnits(q.amountOut)).toBeGreaterThan(900_000);
     const s1 = await c.getState();
     expect(fromUnits(s1.reserves[0])).toBeCloseTo(10_000_000, 3);
     let notified = 0;
     const unsub = c.subscribe(() => { notified++; });
-    const r = await c.swap({ from: "G...", tokenIn: "USDC", tokenOut: "EURC", amountIn: toUnits(1_000_000), minOut: 0n });
+    const r = await c.swap({ from: "G...", tokenIn: "USDC", tokenOut: "USDT", amountIn: toUnits(1_000_000), minOut: 0n });
     expect(r.amountOut).toBe(q.amountOut);
     const s2 = await c.getState();
     expect(fromUnits(s2.reserves[0])).toBeCloseTo(11_000_000, 3);
@@ -31,12 +31,12 @@ describe("MockPoolClient", () => {
   });
   it("enforces minOut", async () => {
     const c = new MockPoolClient();
-    await expect(c.swap({ from: "G", tokenIn: "USDC", tokenOut: "EURC", amountIn: toUnits(1000), minOut: toUnits(1001) }))
+    await expect(c.swap({ from: "G", tokenIn: "USDC", tokenOut: "USDT", amountIn: toUnits(1000), minOut: toUnits(1001) }))
       .rejects.toMatchObject({ code: "SlippageExceeded" });
   });
   it("maps InsufficientLiquidity", async () => {
     const c = new MockPoolClient({ realPerTokenPerTick: 1000, depegBpsList: [100] });
-    await expect(c.quote("USDC", "EURC", toUnits(1_000_000))).rejects.toMatchObject({ code: "InsufficientLiquidity" });
+    await expect(c.quote("USDC", "USDT", toUnits(1_000_000))).rejects.toMatchObject({ code: "InsufficientLiquidity" });
   });
   it("deposit into an existing tick grows tvl proportionally", async () => {
     const c = new MockPoolClient();
@@ -71,7 +71,7 @@ describe("MockPoolClient", () => {
   });
   it("reset restores the seed", async () => {
     const c = new MockPoolClient();
-    await c.swap({ from: "G", tokenIn: "USDC", tokenOut: "EURC", amountIn: toUnits(2_000_000), minOut: 0n });
+    await c.swap({ from: "G", tokenIn: "USDC", tokenOut: "USDT", amountIn: toUnits(2_000_000), minOut: 0n });
     await c.reset();
     const s = await c.getState();
     expect(s.ticks.every((t) => t.state === "interior")).toBe(true);

@@ -1,7 +1,16 @@
 "use client";
 import { useState } from "react";
 import { useWalletDetails } from "@/hooks/useWalletDetails";
+import { useTokenBalances } from "@/hooks/useTokenBalances";
 import { TOKENS } from "@/config/tokens";
+import { fromUnits } from "@/lib/pool/units";
+
+function formatTokenAmount(raw: bigint): string {
+  return fromUnits(raw).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
 
 export function WalletPanel({
   address,
@@ -11,6 +20,7 @@ export function WalletPanel({
   onDisconnect: () => void;
 }) {
   const { explorerUrl, copy, balance, refetch } = useWalletDetails();
+  const { balances: tokenBalances, refresh: refreshTokens } = useTokenBalances(address);
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -73,6 +83,7 @@ export function WalletPanel({
             type="button"
             onClick={() => {
               refetch();
+              refreshTokens();
             }}
             className="text-accent"
           >
@@ -84,14 +95,17 @@ export function WalletPanel({
       <div className="mt-3 border-t border-line pt-3">
         <div className="mb-1 text-[10px] tracking-[0.14em] text-muted-2">TOKENS</div>
         <ul className="space-y-1">
-          {TOKENS.map((token) => (
-            <li key={token.code} className="flex items-center justify-between text-muted">
-              <span>{token.code}</span>
-              <span>—</span>
-            </li>
-          ))}
+          {TOKENS.map((token) => {
+            const raw = tokenBalances[token.code];
+            const display = raw != null ? `${formatTokenAmount(raw)} ${token.code}` : "—";
+            return (
+              <li key={token.code} className="flex items-center justify-between text-muted">
+                <span>{token.code}</span>
+                <span>{display}</span>
+              </li>
+            );
+          })}
         </ul>
-        <p className="mt-1 text-[10px] text-muted-2">available once the pool contract is deployed</p>
       </div>
 
       <div className="mt-3 border-t border-line pt-3">

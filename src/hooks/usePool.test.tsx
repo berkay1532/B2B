@@ -9,7 +9,7 @@ describe("usePool", () => {
     await waitFor(() => expect(result.current.state).not.toBeNull());
     const before = result.current.state!.reserves[0];
     await act(async () => {
-      await result.current.client.swap({ from: "G", tokenIn: "USDC", tokenOut: "EURC", amountIn: toUnits(1000), minOut: 0n });
+      await result.current.client.swap({ from: "G", tokenIn: "USDC", tokenOut: "USDT", amountIn: toUnits(1000), minOut: 0n });
     });
     await waitFor(() => expect(result.current.state!.reserves[0]).toBeGreaterThan(before));
   });

@@ -4,9 +4,11 @@ import { ConnectButton } from "./ConnectButton";
 
 const { useWallet } = vi.hoisted(() => ({ useWallet: vi.fn() }));
 const { useWalletDetails } = vi.hoisted(() => ({ useWalletDetails: vi.fn() }));
+const { useTokenBalances } = vi.hoisted(() => ({ useTokenBalances: vi.fn() }));
 
 vi.mock("@/hooks/useWallet", () => ({ useWallet }));
 vi.mock("@/hooks/useWalletDetails", () => ({ useWalletDetails }));
+vi.mock("@/hooks/useTokenBalances", () => ({ useTokenBalances }));
 
 const ADDRESS = "CABCDEFGH1234567890XYZ";
 
@@ -26,6 +28,11 @@ function setup(disconnect = vi.fn()) {
     balance: { formatted: "123.4560000", symbol: "XLM", status: "success" },
     refetch: vi.fn(),
   });
+  useTokenBalances.mockReturnValue({
+    balances: { USDC: 10000000000000n, USDT: null, USDX: null },
+    status: "success",
+    refresh: vi.fn(),
+  });
   return render(<ConnectButton />);
 }
 
@@ -44,6 +51,7 @@ describe("WalletPanel", () => {
     expect(panel).toBeInTheDocument();
     expect(screen.getByText(ADDRESS)).toBeInTheDocument();
     expect(screen.getByText("123.4560000 XLM")).toBeInTheDocument();
+    expect(screen.getByText("1,000,000.00 USDC")).toBeInTheDocument();
     expect(screen.getByText("DISCONNECT")).toBeInTheDocument();
   });
 

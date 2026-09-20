@@ -83,8 +83,8 @@ interface Quote {
 
 `MockPoolClient` (`src/lib/pool/MockPoolClient.ts:22-25`) seeds:
 
-- 3 tokens (n = 3): `USDC`, `EURC`, `USDX` (placeholder contract ids in
-  `src/config/tokens.ts`, real testnet ids to be filled in once deployed).
+- 3 tokens (n = 3): `USDC`, `USDT`, `USDX` (real testnet Stellar Asset
+  Contract ids, wired in `src/config/tokens.ts` — see §8 below).
 - 4 ticks at **10, 100, 500, 1000 bps**.
 - **$2.5M real reserve per token, per tick** (`realPerTokenPerTick`), i.e.
   each tick is seeded with equal real amounts of all 3 tokens.
@@ -387,7 +387,7 @@ tolerance appropriate for i128-vs-float64 comparison (see §2).
 | `maxFillable(seed, token0, token1)` | `≈ 8,824,999` |
 | Single tick, 1000 bps, $1,000,000 real per token: `maxFillable(tick, 0, 1)` | `≈ 907,378.71` |
 | Same single tick, price at that cap (`priceAfter` just below the cap) | `≈ 1.12710` (token1 in token0) |
-| Seed pool, swap $6,000,000 USDC -> EURC (token0 -> token1) | `amountOut ≈ 5,961,826` |
+| Seed pool, swap $6,000,000 USDC -> USDT (token0 -> token1) | `amountOut ≈ 5,961,826` |
 
 These were produced by running `quote`/`maxFillable` from
 `src/lib/orbital/swap.ts` directly against ticks built with `createTick`
@@ -443,3 +443,29 @@ with a WebAuthn passkey signature. The frontend never constructs this by hand �
 `useSignTransaction().signAndSubmit` (or the `<SignTransactionModal />` component) builds the
 transaction, prompts Face ID / Touch ID / Windows Hello for the passkey ceremony, attaches the
 resulting auth entry, re-simulates, and submits.
+
+## 8. Testnet token contracts
+
+Real SACs, already minted, wired in `src/config/tokens.ts`. Issued and minted by the
+`orbital-issuer` CLI identity (its secret lives only in that identity's local Stellar CLI
+keystore, never in this repo).
+
+| Token | SAC contract id | Decimals |
+| --- | --- | --- |
+| USDC | `CBRFIFQ7O2VVQ63FMO5F3B5F4YWKQJ4534U37CJF54CK324BRNV4XW5D` | 7 |
+| USDT | `CARZAUBVAK236YBY3VQCDBOX4M47YXJZX7ISSLU7WOQABMCE2O7EX3CR` | 7 |
+| USDX | `CBDADMCSOYPDB3ADEEZUBEKHQ2VTEM34SKOQ2DXI2VKLCYBKD37PFQJJ` | 7 |
+
+Issuer (public key): `GBF7D4OLVZUPVMXZEXHCKRN7B6HFZSY4AHOUGOGGG2GIIIIOYYSI2FSE`
+
+All three are USD-pegged by design — Orbital's stableswap curve needs pool tokens at parity
+with each other, so EURC (EUR-pegged) was dropped rather than added as a fourth token.
+
+The smart account `CBWSKKTJLKBYC2FS6PX54QI7LCWXSJWSKDZ2YE5WZZIOCFRBI4WE7BXG` already holds
+1,000,000 of each (`balance` returns `10000000000000`, 7 decimals). Each was minted straight
+to the smart account with the exact command below (repeated per SAC id):
+
+```bash
+stellar contract invoke --network testnet --source orbital-issuer --id <SAC> -- \
+  mint --to CBWSKKTJLKBYC2FS6PX54QI7LCWXSJWSKDZ2YE5WZZIOCFRBI4WE7BXG --amount 10000000000000
+```
