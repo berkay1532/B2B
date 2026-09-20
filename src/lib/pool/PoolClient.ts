@@ -72,6 +72,14 @@ export interface PoolClient {
    * what the contract implements) even when the mock default says otherwise.
    */
   readonly mode: OrbitalMode;
+  /**
+   * Which backend this client talks to. The UI reads this — not an env flag —
+   * to decide whether a connected wallet's on-chain balance should cap the
+   * swap slider: the mock has no real chain balances to read, so only a
+   * `"soroban"` client's swaps can actually fail with an on-chain
+   * insufficient-balance error.
+   */
+  readonly kind: "mock" | "soroban";
   getState(): Promise<PoolState>;
   quote(tokenIn: TokenId, tokenOut: TokenId, amountIn: bigint): Promise<Quote>;
   swap(args: SwapArgs): Promise<{ amountOut: bigint; txHash?: string }>;
