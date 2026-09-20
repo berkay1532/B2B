@@ -698,3 +698,23 @@ v2 always returns at least as much as v1 (boundary ticks still contribute) and
 the pool absorbs slightly more; on this seed the gap is small (+2.0e-5 % on the
 7M swap, +2.3e-3 % on the fill limit) because a tick's ring radius `rho_k` is
 small next to `R_k` near the plane.
+
+### 9.1 Resetting or rebalancing the pool before a demo
+
+The pool has no admin reset. Two options:
+
+- **Fresh pool (cleanest, ~2 minutes).** Redeploy and seed exactly as above, then put the new
+  contract id into Vercel (`NEXT_PUBLIC_POOL_CONTRACT_ID`), `.env.local`, and this table.
+  A fresh seed gives `max_fillable(USDC→USDT) ≈ 8.82M` and the 7M swap crosses two ticks.
+- **Rebalance in place.** Real reserves can be pushed back to equal by swapping from the issuer
+  (its SAC transfers mint, so it never runs out). Rule: to *lower* the pool's reserve of token X,
+  buy X from the pool (sell the other tokens); to raise it, sell X into the pool. Check with
+  `get_state` after each swap. Note that after such trades the per-tick vectors no longer share
+  one normalized position, so `max_fillable` will be lower than a fresh seed (observed 6.37M
+  after a rebalance) even though the real reserves are equal; the pool stays consistent.
+
+```bash
+# example: pool held USDC 13.3M / USDT 2.99M / USDX 13.9M → sell 3.3M USDT for USDC, 3.9M USDT for USDX
+stellar contract invoke --network testnet --source orbital-issuer --id <POOL> -- swap \
+  --from <ISSUER_G> --token_in <USDT_SAC> --token_out <USDC_SAC> --amount_in 33000000000000 --min_out 0
+```
