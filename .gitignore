@@ -43,3 +43,6 @@ next-env.d.ts
 
 # project scratch
 .superpowers/
+
+# rust / soroban contracts
+contracts/target/
