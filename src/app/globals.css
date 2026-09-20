@@ -83,8 +83,31 @@ body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); }
 .orbital-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--line), 0 0 14px var(--accent); }
 .orbital-slider:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--line), 0 0 14px var(--accent); }
 
+/* Inline spinner inside the commit button while a swap is signing/submitting. The button
+   face is --accent with --bg text, so the spinner borrows the same two tokens. */
+@keyframes orbital-spin { to { transform: rotate(360deg); } }
+.orbital-spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--bg) 30%, transparent);
+  border-top-color: var(--bg);
+  animation: orbital-spin 700ms linear infinite;
+}
+
+/* Confirmation line: full strength for ~6s, then settles back to a quiet note. It stays in
+   the DOM until the next user action, so nothing here depends on a JS timer. */
+@keyframes orbital-fade-late {
+  0%, 70% { opacity: 1; }
+  100% { opacity: 0.45; }
+}
+.orbital-fade-late { animation: orbital-fade-late 8.5s ease-out 1 forwards; }
+
 @media (prefers-reduced-motion: reduce) {
   .orbital-ring-pulse { animation: none; }
+  .orbital-spinner { animation: none; }
+  .orbital-fade-late { animation: none; }
 }
 
 /*

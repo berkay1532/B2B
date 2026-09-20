@@ -1,6 +1,6 @@
 "use client";
-import { TOKENS } from "@/config/tokens";
-import { formatUsd } from "@/lib/pool";
+import { TOKENS, txExplorerUrl } from "@/config/tokens";
+import { formatUsd, shortHash, type SwapReceipt, type SwapStatus } from "@/lib/pool";
 
 export interface ControlBarProps {
   tokenIn: string;
@@ -13,6 +13,10 @@ export interface ControlBarProps {
   price: number | null;
   error: string | null;
   busy: boolean;
+  /** Phase of the swap the user last committed; drives the button label and the status line. */
+  swapStatus: SwapStatus;
+  /** Receipt of the last committed swap, shown next to `confirmed`. */
+  lastTx: SwapReceipt | null;
   classic: { amountOut: number; price: number } | null;
   onTokenIn(code: string): void;
   onTokenOut(code: string): void;
@@ -40,7 +44,12 @@ const short = (n: number) => formatUsd(n).slice(1);
 
 const PILL = "h-[26px] rounded-full px-2.5 font-mono text-[11px] transition-colors";
 
-function TokenPills({ label, value, onChange }: { label: string; value: string; onChange(v: string): void }) {
+function TokenPills({
+  label,
+  value,
+  disabled,
+  onChange,
+}: { label: string; value: string; disabled: boolean; onChange(v: string): void }) {
   return (
     <div className="flex items-center gap-2">
       <span className="w-[54px] font-mono text-[9px] tracking-[0.14em] text-muted">{label}</span>
@@ -48,9 +57,10 @@ function TokenPills({ label, value, onChange }: { label: string; value: string; 
         <button
           key={t.code}
           type="button"
+          disabled={disabled}
           onClick={() => onChange(t.code)}
           aria-pressed={value === t.code}
-          className={`${PILL} ${
+          className={`${PILL} disabled:opacity-40 ${
             value === t.code
               ? "border border-accent bg-accent font-medium text-bg"
               : "border border-line text-muted-2 hover:text-fg"
@@ -63,12 +73,16 @@ function TokenPills({ label, value, onChange }: { label: string; value: string; 
   );
 }
 
+/** Label shown on the commit button while a swap is in flight. */
+const BUSY_LABEL: Partial<Record<SwapStatus, string>> = { submitting: "SUBMITTING…" };
+
 export function ControlBar(p: ControlBarProps) {
   const amountNum = Number(p.amount) || 0;
   const fill = Math.max(0, Math.min(1, amountNum / (p.maxAmount || 1)));
   const markers = p.landingAmounts
     .map((l) => ({ depegBps: l.depegBps, at: l.amountIn / (p.maxAmount || 1) }))
     .filter((m) => m.at > 0 && m.at <= 1);
+  const busyLabel = BUSY_LABEL[p.swapStatus] ?? "SIGNING…";
 
   return (
     <section
@@ -77,16 +91,17 @@ export function ControlBar(p: ControlBarProps) {
     >
       {/* 1 · pair */}
       <div className="flex flex-col gap-2.5">
-        <TokenPills label="PAY" value={p.tokenIn} onChange={p.onTokenIn} />
+        <TokenPills label="PAY" value={p.tokenIn} disabled={p.busy} onChange={p.onTokenIn} />
         <button
           type="button"
+          disabled={p.busy}
           onClick={p.onFlip}
           aria-label="flip tokens"
-          className="flex h-[20px] w-[20px] items-center justify-center self-start rounded-full border border-line font-mono text-[10px] leading-none text-muted-2 hover:border-accent hover:text-accent"
+          className="flex h-[20px] w-[20px] items-center justify-center self-start rounded-full border border-line font-mono text-[10px] leading-none text-muted-2 hover:border-accent hover:text-accent disabled:opacity-40"
         >
           ⇅
         </button>
-        <TokenPills label="RECEIVE" value={p.tokenOut} onChange={p.onTokenOut} />
+        <TokenPills label="RECEIVE" value={p.tokenOut} disabled={p.busy} onChange={p.onTokenOut} />
       </div>
 
       {/* 2 · amount + slider */}
@@ -98,6 +113,7 @@ export function ControlBar(p: ControlBarProps) {
               aria-label="amount in"
               inputMode="decimal"
               value={grouped(p.amount)}
+              disabled={p.busy}
               onChange={(e) => p.onAmount(sanitize(e.target.value))}
               placeholder="0"
               className="h-10 w-[240px] min-w-0 border-0 bg-transparent p-0 text-[34px] font-semibold tracking-[-0.01em] text-fg placeholder:text-ghost focus:outline-none"
@@ -130,6 +146,7 @@ export function ControlBar(p: ControlBarProps) {
             min={0}
             max={p.maxAmount}
             step={p.maxAmount / 1000}
+            disabled={p.busy}
             value={Math.min(amountNum, p.maxAmount)}
             // whole tokens only: the step is maxAmount/1000, and a big number with three
             // stray decimals reads like a glitch on a 34px display face
@@ -173,7 +190,14 @@ export function ControlBar(p: ControlBarProps) {
           onClick={p.onCommit}
           className="h-[46px] rounded-xl bg-accent font-mono text-xs font-medium tracking-[0.16em] text-bg shadow-[0_0_24px_color-mix(in_srgb,var(--accent)_35%,transparent)] disabled:opacity-40 disabled:shadow-none"
         >
-          COMMIT SWAP
+          {p.busy ? (
+            <span className="flex items-center justify-center gap-2">
+              <span aria-hidden="true" className="orbital-spinner" />
+              {busyLabel}
+            </span>
+          ) : (
+            "COMMIT SWAP"
+          )}
         </button>
         <button
           type="button"
@@ -183,6 +207,33 @@ export function ControlBar(p: ControlBarProps) {
         >
           RESET
         </button>
+        {/* One line of aftermath, kept until the next action (see `PoolView.onAmount`) and
+            de-emphasised by a pure-CSS fade at ~6s — no timer, so tests stay deterministic.
+            The slot is always present so the bar doesn't jump when the line appears. */}
+        <div className="min-h-[14px]">
+          {p.swapStatus === "confirmed" && (
+            <div
+              data-testid="swap-status"
+              className="orbital-fade-late truncate font-mono text-[10px] text-accent"
+            >
+              {p.lastTx?.hash ? (
+                <>
+                  confirmed ·{" "}
+                  <a
+                    href={txExplorerUrl(p.lastTx.hash)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hover:underline"
+                  >
+                    {shortHash(p.lastTx.hash)} ↗
+                  </a>
+                </>
+              ) : (
+                "confirmed · local"
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {p.error && (
