@@ -7,7 +7,18 @@ export function cpQuote(reserveIn: number, reserveOut: number, amountIn: number)
   return { amountOut: reserveOut - newOut, priceAfter: newIn / newOut, reserveIn: newIn, reserveOut: newOut };
 }
 
-export const classicSeed = (realReserves: number[]): number[] => [...realReserves];
+/**
+ * Seeds the classic x*y=k comparison pool at the Orbital pool's TVL split evenly across
+ * tokens, not at whatever (possibly skewed) reserves the Orbital pool currently holds. A
+ * prior swap can leave the Orbital pool's real reserves skewed, and seeding the classic
+ * pool from that skew makes the two quotes for the same trade direction incomparable —
+ * the classic pool would already be pre-tilted toward or against the trade.
+ */
+export const classicSeed = (realReserves: number[]): number[] => {
+  const tvl = realReserves.reduce((a, b) => a + b, 0);
+  const share = tvl / (realReserves.length || 1);
+  return realReserves.map(() => share);
+};
 
 export function classicApply(reserves: number[], i: number, j: number, amountIn: number): number[] {
   const q = cpQuote(reserves[i], reserves[j], amountIn);

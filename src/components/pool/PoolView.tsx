@@ -16,6 +16,14 @@ import { Hud } from "./Hud";
 
 type WithTicks = { getTicks?: () => Tick[] };
 
+/** Short message for the caption plus the raw diagnostic text (if any) for a `title` tooltip. */
+type UiError = { message: string; details?: string };
+
+function toUiError(e: unknown): UiError {
+  if (e instanceof PoolError) return { message: e.message, details: e.details };
+  return { message: String(e) };
+}
+
 function PanelLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2.5 font-mono text-[11px] tracking-[0.16em] text-muted-2">
@@ -38,7 +46,7 @@ export function PoolView() {
   const [amount, setAmount] = useState("");
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quotedAmount, setQuotedAmount] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<UiError | null>(null);
   const [busy, setBusy] = useState(false);
   const [prevTicks, setPrevTicks] = useState<Tick[] | undefined>();
   const [classic, setClassic] = useState<number[] | null>(null);
@@ -112,7 +120,7 @@ export function PoolView() {
         setQuote(q); setQuotedAmount(amountNum); setError(null);
       } catch (e) {
         if (quoteSeq.current !== seq) return;
-        setQuote(null); setQuotedAmount(null); setError(e instanceof PoolError ? e.message : String(e));
+        setQuote(null); setQuotedAmount(null); setError(toUiError(e));
       }
     }, 80);
     return () => clearTimeout(h);
@@ -172,7 +180,7 @@ export function PoolView() {
       // The wallet's balance just moved too — refresh it so the wallet cap (and the
       // insufficient-balance check) reflect what's actually left to spend.
       refreshWalletBalances();
-    } catch (e) { setSwapStatus("failed"); setError(e instanceof PoolError ? e.message : String(e)); }
+    } catch (e) { setSwapStatus("failed"); setError(toUiError(e)); }
     finally { setBusy(false); }
   };
   const reset = async () => {
@@ -210,7 +218,10 @@ export function PoolView() {
         <div className="relative flex min-h-0 flex-col gap-1.5 lg:pt-10">
           <PanelLabel>{tokenIn} / {tokenOut} CURVE</PanelLabel>
           {shown.length > 0 && (
-            <ClassicCurve i={i} j={j} classic={classic ?? reserves} classicCurrent={classicPreview ?? classic ?? reserves} />
+            <ClassicCurve
+              i={i} j={j}
+              classic={classic ?? reserves} classicCurrent={classicPreview ?? classic ?? reserves}
+            />
           )}
         </div>
 

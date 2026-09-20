@@ -19,7 +19,9 @@ export interface ControlBarProps {
   landingAmounts: { depegBps: number; amountIn: number }[];
   quoteOut: number | null;
   price: number | null;
-  error: string | null;
+  /** `message` is the short user-facing caption; `details` (if present) is the raw diagnostic
+   *  text, shown only as a `title` tooltip. */
+  error: { message: string; details?: string } | null;
   busy: boolean;
   /** Phase of the swap the user last committed; drives the button label and the status line. */
   swapStatus: SwapStatus;
@@ -193,6 +195,7 @@ export function ControlBar(p: ControlBarProps) {
         <div data-testid="classic-out" data-value={p.classic?.amountOut ?? ""} className="font-mono text-[10px] text-muted">
           {p.classic ? `x·y=k would give ${formatUsd(p.classic.amountOut)}` : "x·y=k comparison"}
         </div>
+        <div className="font-mono text-[9px] text-muted-2">x·y=k pool seeded at the same TVL, balanced</div>
       </div>
 
       {/* 4 · actions */}
@@ -254,7 +257,12 @@ export function ControlBar(p: ControlBarProps) {
       </div>
 
       {p.error && (
-        <div className="font-mono text-[10px] text-boundary lg:col-span-4">{p.error}</div>
+        <div
+          className="truncate font-mono text-[10px] text-boundary lg:col-span-4"
+          title={p.error.details}
+        >
+          {p.error.message}
+        </div>
       )}
     </section>
   );

@@ -1,6 +1,6 @@
 "use client";
 import {
-  capitalEfficiency, kappaFromDepeg, projectState, ringRadiusNorm, schematicRadius, tokenCorners,
+  capitalEfficiency, kappaFromDepeg, pricingTicks, projectState, ringRadiusNorm, schematicRadius, tokenCorners,
   type Tick,
 } from "@/lib/orbital";
 import { TOKENS } from "@/config/tokens";
@@ -25,8 +25,14 @@ export function TickPlanes({ ticks, prev, previewing = false }: Props) {
   const spacing = rings.length ? RING_SPAN / rings.length : RING_SPAN;
   const axis = spacing * rings.length;
 
+  // projectState averages Σx/ΣR across every tick, radius-weighted. The 0.1% tick's
+  // radius (~6.5e9) dwarfs the other three combined (~8.5e8), so once it pins at its
+  // plane the average barely moves even as the ticks that are still actually pricing
+  // the trade (the interior ones, or the single widest boundary tick once all are
+  // pinned — see `pricingTicks`) walk out to their own boundary. Project only those
+  // ticks so the dot's radius reflects what's really trading, not the whole-pool mean.
   const at = (t: Tick[]) => {
-    const p = projectState(t);
+    const p = projectState(pricingTicks(t));
     const r = schematicRadius(p.rho, rings) * spacing;
     const a = Math.atan2(p.v, p.u);
     return { x: C + r * Math.cos(a), y: C - r * Math.sin(a) };

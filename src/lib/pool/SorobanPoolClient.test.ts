@@ -124,13 +124,16 @@ describe("SorobanPoolClient", () => {
   });
 
   describe("error mapping", () => {
-    it("maps Error(Contract, #1) to InsufficientLiquidity", async () => {
-      const simulateTransaction = vi.fn().mockResolvedValue(errorSim("HostError: Error(Contract, #1)\nsome diagnostic trace"));
+    it("maps Error(Contract, #1) to InsufficientLiquidity with a friendly message and the raw text in details", async () => {
+      const raw = "HostError: Error(Contract, #1)\nEvent log (newest first):\nsome diagnostic trace";
+      const simulateTransaction = vi.fn().mockResolvedValue(errorSim(raw));
       const client = new SorobanPoolClient({ ...BASE_OPTS, server: { simulateTransaction } });
 
       const err = await client.quote("USDC", "USDT", 1_000_000_000n).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(PoolError);
       expect((err as PoolError).code).toBe("InsufficientLiquidity");
+      expect((err as PoolError).message).toBe("Not enough pool liquidity for this amount");
+      expect((err as PoolError).details).toBe(raw);
     });
 
     it("maps Error(Contract, #2) to SlippageExceeded", async () => {
@@ -140,15 +143,28 @@ describe("SorobanPoolClient", () => {
       const err = await client.getState().catch((e: unknown) => e);
       expect(err).toBeInstanceOf(PoolError);
       expect((err as PoolError).code).toBe("SlippageExceeded");
+      expect((err as PoolError).message).toBe("Price moved past your slippage limit");
     });
 
-    it("falls back to Unknown for an unmapped contract error code", async () => {
-      const simulateTransaction = vi.fn().mockResolvedValue(errorSim("Error(Contract, #7)"));
+    it("maps Error(Contract, #10) — the SAC token contract's balance error — to a friendly wallet-balance message", async () => {
+      const raw = "HostError: Error(Contract, #10)\nEvent log (newest first):\nbalance is not sufficient to spend";
+      const simulateTransaction = vi.fn().mockResolvedValue(errorSim(raw));
+      const client = new SorobanPoolClient({ ...BASE_OPTS, server: { simulateTransaction } });
+
+      const err = await client.quote("USDC", "USDT", 1_000_000_000n).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(PoolError);
+      expect((err as PoolError).message).toBe("Insufficient token balance in your wallet");
+      expect((err as PoolError).details).toBe(raw);
+    });
+
+    it("falls back to Unknown for an unmapped contract error code, with a truncated raw message", async () => {
+      const simulateTransaction = vi.fn().mockResolvedValue(errorSim("Error(Contract, #99)"));
       const client = new SorobanPoolClient({ ...BASE_OPTS, server: { simulateTransaction } });
 
       const err = await client.getState().catch((e: unknown) => e);
       expect(err).toBeInstanceOf(PoolError);
       expect((err as PoolError).code).toBe("Unknown");
+      expect((err as PoolError).message).toBe("Transaction simulation failed: Error(Contract, #99)");
     });
   });
 

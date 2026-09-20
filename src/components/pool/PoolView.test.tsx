@@ -107,7 +107,8 @@ describe("PoolView", () => {
     render(<PoolView />);
     await waitFor(() => expect(screen.getByText("$30,000,000.00")).toBeInTheDocument());
     // 20,000,000 in: the classic preview reserve (cp[i] ≈ 30M) runs well past the
-    // stretch of hyperbola the panel samples (2.2 × classic[i] = 22M).
+    // committed Orbital pool's own liquidity edge (~8.8M), which now bounds the
+    // stretch of hyperbola the panel samples — the dot must still stay on-chart.
     fireEvent.change(screen.getByLabelText("amount in"), { target: { value: "20000000" } });
     await waitFor(() => expect(screen.getByTestId("classic-dot")).toBeInTheDocument());
     const svg = screen.getByRole("img", { name: "classic curve" });

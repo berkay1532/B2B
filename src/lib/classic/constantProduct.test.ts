@@ -17,4 +17,11 @@ describe("constant product", () => {
     expect(n[2]).toBe(10);
     expect(r[0]).toBe(10); // input untouched
   });
+  it("classicSeed balances a skewed pool at the same TVL, not the current skew", () => {
+    // a prior swap could leave the Orbital pool's real reserves skewed like this
+    const skewed = [20, 5, 5];
+    const r = classicSeed(skewed);
+    expect(r).toEqual([10, 10, 10]); // 30 total / 3 tokens, evenly
+    expect(r.reduce((a, b) => a + b, 0)).toBeCloseTo(skewed.reduce((a, b) => a + b, 0), 9);
+  });
 });
