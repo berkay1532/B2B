@@ -114,7 +114,15 @@ export function PoolView() {
   const ghost = previewTicks ? ticks : prevTicks;      // grey dot: committed state during preview, else last committed
   const numeraire = [0, 1, 2].find((k) => k !== i && k !== j) ?? 0;
   const prices = shown.length ? [0, 1, 2].map((k) => poolPrice(pricingTicks(shown), k, numeraire)) : [1, 1, 1];
-  const reserves = shown.length ? poolRealReserves(shown) : state.reserves.map(fromUnits);
+  // Committed reserves come from the client exactly as reported (on-chain they are exact
+  // integers); recomputing them from tick vectors in float drifts by ~1e-12 * radius, which on a
+  // 6.5e9 radius tick shows up as a cent in the TVL. During a preview only the *delta* between
+  // preview and committed ticks is taken from the float math, so the drift cancels.
+  const committedReserves = state.reserves.map(fromUnits);
+  const reserves = previewTicks && ticks.length
+    ? (() => { const before = poolRealReserves(ticks); const after = poolRealReserves(previewTicks);
+               return committedReserves.map((r, k) => r + (after[k] - before[k])); })()
+    : committedReserves;
   const tvl = reserves.reduce((a, b) => a + b, 0);
   const tickRows = shown.map((t) => ({ depegBps: t.depegBps, capEff: capitalEfficiency(t.depegBps, 3), state: t.state }));
 
