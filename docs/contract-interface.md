@@ -496,3 +496,180 @@ stellar contract invoke --network testnet --source orbital-issuer --id <POOL> --
 Frontend: `.env.local` with `NEXT_PUBLIC_POOL_BACKEND=soroban` and
 `NEXT_PUBLIC_POOL_CONTRACT_ID=<POOL>` switches `getPoolClient()` to the
 `SorobanPoolClient`. Testnet resets wipe the deployment; redo §8 and this section.
+
+## 10. v2: torus consolidation
+
+Implemented in `src/lib/orbital/torus.ts`, selected by
+`NEXT_PUBLIC_ORBITAL_MODE=v2` (`src/lib/orbital/mode.ts`). **The deployed
+contract in §9 is v1**; this section is the spec for the Rust port (Task 2).
+
+### 10.1 Coordinates
+
+v1 stores a tick's effective reserves `x` on the sphere centred at `(R,…,R)`
+(§4.10). The paper works in reserves centred at the origin. The map is exact:
+
+```
+r_i = R - x_i      =>   sum_i r_i^2 = R^2       (and x = R*1 - r)
+```
+
+`Tick.x` stays the stored representation, so `PoolView`, `TickPlanes`,
+`pricingTicks` and `realReserves` are untouched. Let `v = 1/sqrt(n)` per
+component be the equal-price direction. For tick `k`, with `kappa_k` from
+§4.2:
+
+```
+b_k = h_k / R_k = sqrt(n) - kappa_k      normalized plane height (r.v = h_k)
+sigma_k = rho_k / R_k = sqrt(1 - b_k^2)  normalized ring radius (||r_perp|| = rho_k)
+```
+
+`b_k = 1` at peg (`kappa = sqrt(n) - 1`) and *decreases* as the tick widens;
+`sigma_k` is exactly `ringRadiusNorm(kappa_k, n)` from `geometry.ts`. The tick
+is **interior** while `r.v > h_k` and **boundary** at `r.v = h_k`. Because
+`sum_i x_i = n*R_k - sqrt(n)*(r.v)`, that is the same test as v1's
+`sum(x) < planeSum` (§4.6).
+
+### 10.2 The invariant
+
+Interior ticks are scaled copies of one another (equal marginal price forces
+`r_k = (R_k/R_int) * r_int`), so they add up to one sphere of radius
+`R_int = sum_{k interior} R_k`. Boundary ticks are pinned to their planes and
+ride their own `(n-1)`-spheres; under an `(i,j)` trade they all stay at the
+same normalized position on those spheres, so they add up to one circle at
+height `H = sum_{k boundary} h_k` with radius `R_bound = sum_{k boundary} rho_k`.
+
+Write the pool total `r = r_int + r_bound` and split off the component along
+`v` (call it `p`) and the perpendicular norm (`q`). Then `r_int.v = p - H`,
+`||r_int_perp|| = q - R_bound`, and the interior sphere gives
+
+```
+(p - H)^2 + (q - R_bound)^2 = R_int^2                            [TORUS]
+```
+
+a circle of radius `R_int` centred at `(H, R_bound)` in the
+(parallel, perpendicular-radius) half-plane, revolved around the `v` axis.
+
+In our stored `x` coordinates, with `X = sum_k x_k` the pool's total effective
+reserves, `S = sum_i X_i` and `R_tot = sum_k R_k`:
+
+```
+p = (n*R_tot - S) / sqrt(n)
+q = || X - (S/n)*1 ||           (= ||r_perp||; the sign flip does not matter)
+```
+
+**Reduction to v1.** With no boundary tick, `H = 0`, `R_bound = 0`,
+`R_int = R_tot`, and [TORUS] becomes `p^2 + q^2 = R_tot^2`, i.e.
+`sum_i (R_tot - X_i)^2 = R_tot^2` — v1's sphere (§4.10) on the consolidated
+pool. `solveOut` takes the §4.11 closed form on that branch, so v2 *is* v1
+there, exactly (the TS differential test confirms agreement at 1e-16 relative;
+the ~1e-9 residual gap at a $1k trade is v1's own float64 cancellation, since
+v1 forms `out` as a difference of two pool-sized reserves).
+
+### 10.3 Crossing condition
+
+Define the interior block's normalized perpendicular extent
+
+```
+s = (q - R_bound) / R_int        (and alpha = (p - H)/R_int = sqrt(1 - s^2))
+```
+
+Tick `k` is interior exactly while `s < sigma_k`, and crosses when
+`s` reaches `sigma_k`. Both `s` and `alpha` are *continuous* across a
+reclassification: moving tick `k` from interior to boundary changes
+`R_int -> R_int - R_k`, `R_bound -> R_bound + rho_k`, `H -> H + h_k`, and at
+`s = sigma_k` these leave `s` and `alpha` unchanged. Prefer `s` over `alpha`
+numerically: near the equal point `alpha -> 1` and loses precision, while the
+`sigma_k` of the seed's ticks (4.7e-4, 4.7e-3, 2.4e-2, 4.9e-2) are well
+separated.
+
+`s` rises as the pool moves away from the equal point and falls as it moves
+back, so v1's ad-hoc "reactivation rule" disappears: a boundary tick un-freezes
+exactly when `s` drops back below its `sigma_k`.
+
+### 10.4 Solving a trade
+
+Fix the classification. Token `i` goes in by `delta`; solve for `y = X_j`
+after the trade. With `T = sum_{m != i,j} X_m`, `C = sum_{m != i,j} X_m^2`,
+`xi = X_i + delta`, `S = T + xi + y`:
+
+```
+a(y) = (n*R_tot - S)/sqrt(n) - H
+q(y) = sqrt(C + xi^2 + y^2 - S^2/n)
+F(y) = a^2 + (q - R_bound)^2 - R_int^2        // == 0 on the torus
+F'(y) = -2a/sqrt(n) + 2*(q - R_bound)*(y - S/n)/q
+```
+
+Clearing the square root in `F` gives a quartic in `y` (hence "the torus
+quartic"); we iterate on `F` itself, which is smoother and has no spurious
+mirror root.
+
+**Newton with a bracket.** `F` is strictly decreasing in `y` near the root
+(`dF/dy = -2*r_int,j < 0`), and `dF/ddelta = -2*r_int,i < 0`, so `F(X_j) < 0`
+for `delta > 0`. The lower end is the `y` at which `a = R_int` (i.e.
+`alpha = 1`), where `F = (q - R_bound)^2 >= 0`:
+
+```
+y_lo = n*R_tot - sqrt(n)*(R_int + H) - T - xi      F(y_lo) >= 0
+y_hi = X_j                                          F(y_hi) <  0
+```
+
+Seed with the v1 closed form on the consolidated interior sphere, then at most
+32 Newton steps, tolerance 1e-9 relative; a step that leaves the bracket falls
+back to bisection, and the bracket is tightened from the sign of `F` at every
+iterate. No bracket => `InsufficientLiquidity`; no convergence in 32 =>
+`NoConvergence`.
+
+**Segmentation.** `s` is *not* monotone along a trade: it falls while the pool
+moves toward the equal point and rises after. The turning point is exactly
+where `X_i = X_j` (equivalently `r_i = r_j`, marginal price 1), and
+`h(delta) = X_i + delta - y(delta)` is strictly increasing, so it is found by
+bisection on a clean bracket. Each segment is capped at the turning point, so
+`s` is monotone within it; then the nearest `sigma_k` the segment would cross
+is found and `crossingDelta` bisects `s(delta) = sigma_k`. Apply the segment,
+flip that tick, re-consolidate, repeat (at most 64 segments).
+
+**No epsilon-short landings.** `s` is *re-derived from the membership set*
+after every flip:
+`s' = (R_int*s - R_k*sigma_k) / (R_int - R_k)`. That keeps
+`sum_k R_k * sigma'_k = q` exact, so a tick flagged boundary is pinned exactly
+on its plane rather than a rounding epsilon short of it.
+
+**All ticks pinned.** With `R_int = 0` the pool's parallel component is frozen
+and an `(i,j)`-only trade is over-determined: no trade is possible, which is
+v1's `InsufficientLiquidity` at the fill limit. A trade in the *inward*
+direction first promotes the widest-ring boundary tick back to interior (that
+lands `s` exactly on its own `sigma_k`), so the pool is never permanently stuck.
+
+### 10.5 Recovering the individual ticks
+
+Let `w = -(X - (S/n)*1)/q` be the unit perpendicular direction (zero when
+`q = 0`). Every tick sits at
+
+```
+sigma'_k = s   and beta_k = alpha   while interior
+sigma'_k = sigma_k and beta_k = b_k once at the boundary
+
+x_{k,m} = R_k * (1 - beta_k/sqrt(n) - sigma'_k * w_m)
+```
+
+Summing over `k` reproduces `X` exactly, and per tick
+`sum_m (R_k - x_{k,m})^2 = R_k^2 * (beta_k^2 + sigma'_k^2) = R_k^2`, so each
+tick stays on its own sphere. For a boundary tick,
+`sum_m x_{k,m} = R_k*(n - b_k*sqrt(n)) = kappa_k*R_k*sqrt(n) = planeSum(t)` —
+its parallel component is pinned while its perpendicular reserves keep moving.
+This is the substantive difference from v1: boundary ticks keep trading on
+their circles instead of freezing, so the pool rebalances token holdings
+between ticks while its externally visible totals move only in `i` and `j`.
+
+### 10.6 Calibration (same seed as §3 and §6)
+
+| Scenario | v1 | v2 |
+| --- | --- | --- |
+| swap $7,000,000 token0 -> token1 | `6,924,145.1534203` (2 crossed) | `6,924,146.5214806` (2 crossed) |
+| swap $6,000,000 token0 -> token1 | `5,961,825.9175513` | `5,961,826.1486547` |
+| `maxFillable(token0, token1)` | `8,824,998.8877716` | `8,825,197.8992174` |
+| tick landings (10/100/500/1000 bps) | 2,446,650 / 4,987,798 / 7,656,237 / 8,824,999 | 2,446,650 / 4,987,799 / 7,656,292 / 8,825,198 |
+
+v2 always returns at least as much as v1 (boundary ticks still contribute) and
+the pool absorbs slightly more; on this seed the gap is small (+2.0e-5 % on the
+7M swap, +2.3e-3 % on the fill limit) because a tick's ring radius `rho_k` is
+small next to `R_k` near the plane.

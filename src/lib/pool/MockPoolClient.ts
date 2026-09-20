@@ -1,5 +1,5 @@
 import { TOKENS, tokenIndex } from "@/config/tokens";
-import { capitalEfficiency, createTick, cloneTick, OrbitalError, poolRealReserves, quote as mathQuote, realReserves, type Tick } from "@/lib/orbital";
+import { capitalEfficiency, createTick, cloneTick, OrbitalError, poolRealReserves, quoteAuto as mathQuote, realReserves, type Tick } from "@/lib/orbital";
 import { PoolError, type PoolClient, type PoolState, type Quote, type SwapArgs, type TokenId } from "./PoolClient";
 import { fromUnits, toUnits } from "./units";
 

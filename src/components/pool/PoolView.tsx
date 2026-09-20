@@ -6,7 +6,7 @@ import { usePoolSigner } from "@/hooks/usePoolSigner";
 import { TOKENS, tokenIndex } from "@/config/tokens";
 import { fromUnits, toUnits, PoolError, type Quote, type SwapReceipt, type SwapStatus } from "@/lib/pool";
 import { ticksFromState } from "@/lib/pool/reconstruct";
-import { capitalEfficiency, maxFillable, poolPrice, poolRealReserves, pricingTicks, quote as mathQuote, tickLandingAmounts, type Tick } from "@/lib/orbital";
+import { capitalEfficiency, maxFillableAuto, poolPrice, poolRealReserves, pricingTicks, quoteAuto as mathQuote, tickLandingAmountsAuto, type Tick } from "@/lib/orbital";
 import { cpQuote, classicApply, classicSeed } from "@/lib/classic/constantProduct";
 import { TickPlanes } from "./TickPlanes";
 import { ClassicCurve } from "./ClassicCurve";
@@ -59,11 +59,11 @@ export function PoolView() {
   // cap the slider at what the committed pool can actually fill, so a max-slider swap
   // never round-trips an InsufficientLiquidity error from the client.
   const maxIn = useMemo(
-    () => (ticks.length ? Math.max(Math.floor(maxFillable(ticks, i, j)), 1) : 1),
+    () => (ticks.length ? Math.max(Math.floor(maxFillableAuto(ticks, i, j)), 1) : 1),
     [ticks, i, j],
   );
   // amber slider markers: where each interior tick lands on its plane
-  const landingAmounts = useMemo(() => tickLandingAmounts(ticks, i, j), [ticks, i, j]);
+  const landingAmounts = useMemo(() => tickLandingAmountsAuto(ticks, i, j), [ticks, i, j]);
   const amountNum = Number(amount);
   // synchronous, independent of the debounced client round trip — the classic row and
   // classic dot must move instantly with the slider, same as the Orbital preview does.
